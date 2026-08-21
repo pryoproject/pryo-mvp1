@@ -3,7 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import type { AuditReport, Finding } from "@pryo/domain";
 
-type ApiError = { error?: string };
+type ApiError = { error?: string; code?: string };
 type StartResponse = { auditId: string; status: string };
 type AuditState = {
   id: string;
@@ -38,6 +38,22 @@ const stageLabels: Record<string, string> = {
 function statusClass(status: Finding["status"]) { return `status status-${status}`; }
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+async function readJsonResponse<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(response.ok ? "Pryo returned an empty response." : `${fallback} (HTTP ${response.status}).`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${fallback} The server returned an invalid response (HTTP ${response.status}).`);
+  }
+}
+
+function isTransientStatus(status: number) {
+  return status === 502 || status === 503 || status === 504;
+}
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,15 +69,40 @@ export default function Home() {
 
   async function pollAudit(auditId: string) {
     for (let attempt = 0; attempt < 180; attempt += 1) {
-      const response = await fetch(`/api/audits/${auditId}`, { cache: "no-store" });
-      const state = (await response.json()) as AuditState | ApiError;
+      let response: Response;
+      try {
+        response = await fetch(`/api/audits/${auditId}`, { cache: "no-store" });
+      } catch {
+        await sleep(1_500);
+        continue;
+      }
+
+      if (isTransientStatus(response.status)) {
+        await sleep(1_500);
+        continue;
+      }
+
+      const state = await readJsonResponse<AuditState | ApiError>(response, "Could not read audit status.");
       if (!response.ok) throw new Error("error" in state && state.error ? state.error : "Could not read audit status.");
       const current = state as AuditState;
       setAuditState(current);
       if (current.status === "failed") throw new Error(current.errorMessage || "Audit failed.");
+
       if (current.status === "completed" && current.reportReady) {
-        const reportResponse = await fetch(`/api/audits/${auditId}/report`, { cache: "no-store" });
-        const reportData = (await reportResponse.json()) as AuditReport | ApiError;
+        let reportResponse: Response;
+        try {
+          reportResponse = await fetch(`/api/audits/${auditId}/report`, { cache: "no-store" });
+        } catch {
+          await sleep(1_500);
+          continue;
+        }
+
+        if (isTransientStatus(reportResponse.status) || reportResponse.status === 409) {
+          await sleep(1_500);
+          continue;
+        }
+
+        const reportData = await readJsonResponse<AuditReport | ApiError>(reportResponse, "Report could not be loaded.");
         if (!reportResponse.ok) throw new Error("error" in reportData && reportData.error ? reportData.error : "Report could not be loaded.");
         return reportData as AuditReport;
       }
@@ -79,7 +120,7 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url })
       });
-      const data = (await response.json()) as StartResponse | ApiError;
+      const data = await readJsonResponse<StartResponse | ApiError>(response, "Audit could not be started.");
       if (!response.ok) throw new Error("error" in data && data.error ? data.error : "Audit could not be started.");
       const result = await pollAudit((data as StartResponse).auditId);
       setReport(result);
