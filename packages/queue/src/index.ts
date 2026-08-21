@@ -1,10 +1,10 @@
 import { Queue, type JobsOptions } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 
 export const AUDIT_QUEUE = "pryo-audits";
 export interface AuditJobData { auditId: string; url: string; }
 
-let producerRedis: IORedis | undefined;
+let producerRedis: Redis | undefined;
 let auditQueue: Queue<AuditJobData> | undefined;
 
 function redisUrl() {
@@ -14,12 +14,12 @@ function redisUrl() {
 }
 
 export function getProducerConnection() {
-  if (!producerRedis) producerRedis = new IORedis(redisUrl(), { enableReadyCheck: true });
+  if (!producerRedis) producerRedis = new Redis(redisUrl(), { enableReadyCheck: true });
   return producerRedis;
 }
 
 export function createWorkerConnection() {
-  return new IORedis(redisUrl(), { maxRetriesPerRequest: null, enableReadyCheck: true });
+  return new Redis(redisUrl(), { maxRetriesPerRequest: null, enableReadyCheck: true });
 }
 
 export function getAuditQueue() {
