@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import type { AuditReport, Evidence, Finding, ProjectContext } from "@pryo/domain";
+import type { AuditReport, ProjectContext } from "@pryo/domain";
 
 export type AuditStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -21,6 +21,10 @@ export interface AuditRecord {
 
 let sqlClient: Sql | undefined;
 let schemaPromise: Promise<void> | undefined;
+
+function serializeJson(value: unknown) {
+  return JSON.stringify(value);
+}
 
 export function getSql() {
   if (sqlClient) return sqlClient;
@@ -95,8 +99,8 @@ export async function completeAudit(id: string, report: AuditReport) {
       update audits set
         status = 'completed', stage = 'completed', progress = 100,
         canonical_url = ${report.project.canonicalUrl},
-        project_context = ${tx.json(report.project)},
-        report = ${tx.json(report)},
+        project_context = ${serializeJson(report.project)}::jsonb,
+        report = ${serializeJson(report)}::jsonb,
         updated_at = now(), completed_at = now(),
         error_code = null, error_message = null
       where id = ${id}
@@ -104,10 +108,10 @@ export async function completeAudit(id: string, report: AuditReport) {
     await tx`delete from audit_evidence where audit_id = ${id}`;
     await tx`delete from audit_findings where audit_id = ${id}`;
     for (const evidence of report.evidence) {
-      await tx`insert into audit_evidence (audit_id, evidence_id, payload) values (${id}, ${evidence.id}, ${tx.json(evidence)})`;
+      await tx`insert into audit_evidence (audit_id, evidence_id, payload) values (${id}, ${evidence.id}, ${serializeJson(evidence)}::jsonb)`;
     }
     for (const finding of report.findings) {
-      await tx`insert into audit_findings (audit_id, finding_id, payload) values (${id}, ${finding.id}, ${tx.json(finding)})`;
+      await tx`insert into audit_findings (audit_id, finding_id, payload) values (${id}, ${finding.id}, ${serializeJson(finding)}::jsonb)`;
     }
   });
 }
