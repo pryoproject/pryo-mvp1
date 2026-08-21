@@ -1,6 +1,6 @@
 {
   "name": "@pryo/worker",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "tsx": "^4.20.5",
     "@pryo/db": "workspace:*",
+    "@pryo/domain": "workspace:*",
     "@pryo/queue": "workspace:*",
     "@pryo/pipeline": "workspace:*",
     "@pryo/crawler": "workspace:*",
