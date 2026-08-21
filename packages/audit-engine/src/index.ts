@@ -239,7 +239,8 @@ function makeFinding(auditId: string, definition: CheckDefinition, evidenceId: s
 
   const { finding } = definition;
   const confidence = Math.max(1, Math.min(10, Math.round(definition.confidence * 10)));
-  const iceScore = ice(finding.impact, confidence, finding.ease);
+  const nonAction = finding.decision === "preserve" || finding.decision === "ignore";
+  const iceScore = nonAction ? 0 : ice(finding.impact, confidence, finding.ease);
   const reference = ids(auditId, definition.code);
 
   return {
@@ -263,13 +264,13 @@ function makeFinding(auditId: string, definition: CheckDefinition, evidenceId: s
       timeToSignal: finding.timeToSignal
     },
     scores: {
-      impact: finding.impact,
+      impact: nonAction ? 0 : finding.impact,
       confidence,
-      ease: finding.ease,
+      ease: nonAction ? 0 : finding.ease,
       ice: iceScore,
       urgency: 1,
       unlock: 1,
-      priority: priorityScore(iceScore)
+      priority: nonAction ? 0 : priorityScore(iceScore)
     },
     affectedKpis: finding.affectedKpis,
     dependencies: [],

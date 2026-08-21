@@ -1,0 +1,16 @@
+{
+  "name": "@pryo/pipeline",
+  "version": "0.0.3",
+  "type": "module",
+  "scripts": {"typecheck":"tsc --noEmit"},
+  "dependencies": {
+    "@pryo/ai":"workspace:*",
+    "@pryo/audit-engine":"workspace:*",
+    "@pryo/crawler":"workspace:*",
+    "@pryo/domain":"workspace:*",
+    "@pryo/scoring":"workspace:*"
+  },
+  "devDependencies": {"typescript":"^5.9.2","@types/node":"^24.3.0"},
+  "exports": {".":"./src/index.ts"},
+  "types":"./src/index.ts"
+}

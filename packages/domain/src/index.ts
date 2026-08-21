@@ -76,9 +76,9 @@ export const FindingSchema = z.object({
   evidenceIds: z.array(z.string()).min(1),
   recommendation: RecommendationSchema.optional(),
   scores: z.object({
-    impact: z.number().min(1).max(10),
-    confidence: z.number().min(1).max(10),
-    ease: z.number().min(1).max(10),
+    impact: z.number().min(0).max(10),
+    confidence: z.number().min(0).max(10),
+    ease: z.number().min(0).max(10),
     ice: z.number().min(0).max(1000),
     urgency: z.number().min(0.5).max(1.5),
     unlock: z.number().min(1).max(1.25),
@@ -119,10 +119,10 @@ export const AuditReportSchema = z.object({
   audit: z.object({ id: z.string(), completedAt: z.string(), version: z.string() }),
   project: ProjectContextSchema,
   summary: z.object({
-    health: z.number().min(0).max(100),
+    observedScore: z.number().min(0).max(100),
     confidence: z.number().min(0).max(100),
     coverage: z.number().min(0).max(100),
-    growthPotential: z.enum(["low", "medium", "high"])
+    growthPotential: z.enum(["unknown", "low", "medium", "high"])
   }),
   categories: z.array(CategoryScoreSchema),
   checks: z.array(AuditCheckSchema),

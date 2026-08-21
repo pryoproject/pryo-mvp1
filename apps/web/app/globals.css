@@ -96,3 +96,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .finding summary > div { align-items: flex-start; flex-direction: column; }
   .finding-body { padding-left: 0; }
 }
+
+.progress-copy { flex: 1; }
+.progress-track { height: 5px; margin-top: 10px; overflow: hidden; background: #e7e9ed; border-radius: 999px; }
+.progress-track span { display: block; height: 100%; background: #15171a; border-radius: inherit; transition: width .35s ease; }
+.context-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.context-row span { padding: 5px 8px; border-radius: 999px; background: #eef0f3; color: #626872; font-size: 11px; }
+.preserve-card { background: rgba(247,252,248,.94); }
+.strength-list { border-top: 1px solid #e5ece7; }
+.strength-list > div { display: flex; align-items: center; gap: 10px; padding: 14px 0; border-bottom: 1px solid #e5ece7; }

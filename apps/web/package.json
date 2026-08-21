@@ -1,6 +1,6 @@
 {
   "name": "@pryo/web",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -14,7 +14,9 @@
     "@pryo/domain": "workspace:*",
     "next": "^16.0.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "@pryo/db": "workspace:*",
+    "@pryo/queue": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
