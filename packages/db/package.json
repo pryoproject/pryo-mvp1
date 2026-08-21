@@ -1,6 +1,6 @@
 {
   "name": "@pryo/db",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "scripts": {"typecheck":"tsc --noEmit"},
   "dependencies": {"@pryo/domain":"workspace:*","postgres":"^3.4.7"},

@@ -105,3 +105,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .preserve-card { background: rgba(247,252,248,.94); }
 .strength-list { border-top: 1px solid #e5ece7; }
 .strength-list > div { display: flex; align-items: center; gap: 10px; padding: 14px 0; border-bottom: 1px solid #e5ece7; }
+
+.scope-card { margin: 0 0 18px; padding: 22px 24px; }
+.scope-card h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.025em; }
+.page-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.page-chips a { min-width: 0; padding: 10px 12px; border: 1px solid #e4e7eb; border-radius: 11px; background: #f8f9fa; text-decoration: none; display: flex; flex-direction: column; gap: 3px; }
+.page-chips strong { text-transform: uppercase; letter-spacing: .07em; font-size: 9px; color: #777e87; }
+.page-chips span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #373c43; }
+.scope-status { margin: 14px 0 0; color: #7d838c; font-size: 12px; }
+.scope-status strong { color: #444a52; }
+.root-link { display: inline-flex; margin: 4px 0 2px !important; padding: 5px 8px; border-radius: 8px; background: #f0f2f5; color: #686f78 !important; font-size: 11px; }
+.finding-body blockquote a { display: block; margin-top: 7px; color: #777e87; font-size: 10px; text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 720px) {
+  .page-chips { grid-template-columns: 1fr; }
+}

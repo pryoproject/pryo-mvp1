@@ -1,6 +1,6 @@
 {
   "name": "@pryo/pipeline",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "scripts": {"typecheck":"tsc --noEmit"},
   "dependencies": {
@@ -8,6 +8,7 @@
     "@pryo/audit-engine":"workspace:*",
     "@pryo/crawler":"workspace:*",
     "@pryo/domain":"workspace:*",
+    "@pryo/performance":"workspace:*",
     "@pryo/scoring":"workspace:*"
   },
   "devDependencies": {"typescript":"^5.9.2","@types/node":"^24.3.0"},

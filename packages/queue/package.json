@@ -1,6 +1,6 @@
 {
   "name": "@pryo/queue",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "scripts": {"typecheck":"tsc --noEmit"},
   "dependencies": {"bullmq":"^5.58.0","ioredis":"^5.7.0"},

@@ -93,6 +93,23 @@ export const FindingSchema = z.object({
 });
 export type Finding = z.infer<typeof FindingSchema>;
 
+export const RootCauseSchema = z.object({
+  id: z.string(),
+  area: AuditAreaSchema,
+  title: z.string(),
+  description: z.string(),
+  findingIds: z.array(z.string()).min(1),
+  evidenceIds: z.array(z.string()),
+  decision: DecisionSchema,
+  status: FindingStatusSchema,
+  confidence: z.number().min(0).max(100),
+  priority: z.number().min(0).max(100),
+  action: z.string(),
+  validation: z.string(),
+  timeToSignal: z.string().optional()
+});
+export type RootCause = z.infer<typeof RootCauseSchema>;
+
 export const CategoryScoreSchema = z.object({
   area: AuditAreaSchema,
   score: z.number().min(0).max(100),
@@ -115,6 +132,18 @@ export const ProjectContextSchema = z.object({
 });
 export type ProjectContext = z.infer<typeof ProjectContextSchema>;
 
+export const AuditScopeSchema = z.object({
+  pagesAnalyzed: z.number().int().min(1),
+  pages: z.array(z.object({
+    url: z.string().url(),
+    kind: z.string(),
+    title: z.string().optional()
+  })),
+  performanceAvailable: z.boolean(),
+  performanceSource: z.enum(["pagespeed_lab", "unavailable"])
+});
+export type AuditScope = z.infer<typeof AuditScopeSchema>;
+
 export const AuditReportSchema = z.object({
   audit: z.object({ id: z.string(), completedAt: z.string(), version: z.string() }),
   project: ProjectContextSchema,
@@ -124,10 +153,12 @@ export const AuditReportSchema = z.object({
     coverage: z.number().min(0).max(100),
     growthPotential: z.enum(["unknown", "low", "medium", "high"])
   }),
+  scope: AuditScopeSchema.optional(),
   categories: z.array(CategoryScoreSchema),
   checks: z.array(AuditCheckSchema),
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
+  rootCauses: z.array(RootCauseSchema).default([]),
   priorities: z.array(RecommendationSchema)
 });
 export type AuditReport = z.infer<typeof AuditReportSchema>;

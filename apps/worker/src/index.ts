@@ -20,8 +20,10 @@ const worker = new Worker<AuditJobData>(
       await completeAudit(auditId, report);
       return { auditId };
     } catch (error) {
-      const code = error instanceof CrawlError ? error.code : error instanceof Error && /OPENAI/i.test(error.message) ? "AI_ANALYSIS_FAILED" : "AUDIT_FAILED";
-      const message = error instanceof CrawlError ? error.message : "The audit could not be completed. Please retry later.";
+      const status = typeof error === "object" && error && "status" in error ? Number((error as { status?: unknown }).status) : undefined;
+      const providerError = status === 401 || status === 403 || status === 429;
+      const code = error instanceof CrawlError ? error.code : providerError ? "AI_PROVIDER_UNAVAILABLE" : error instanceof Error && /openai/i.test(`${error.name} ${error.message}`) ? "AI_ANALYSIS_FAILED" : "AUDIT_FAILED";
+      const message = error instanceof CrawlError ? error.message : providerError ? "AI analysis is temporarily unavailable. Please retry later." : "The audit could not be completed. Please retry later.";
       await failAudit(auditId, code, message);
       throw error;
     }
@@ -29,7 +31,7 @@ const worker = new Worker<AuditJobData>(
   { connection, concurrency }
 );
 
-worker.on("ready", () => console.log(`Pryo worker v0.3 ready (concurrency=${concurrency})`));
+worker.on("ready", () => console.log(`Pryo worker v0.4 ready (concurrency=${concurrency})`));
 worker.on("completed", (job) => console.log("audit_completed", job.id));
 worker.on("failed", (job, error) => console.error("audit_failed", job?.id, error));
 worker.on("error", (error) => console.error("worker_error", error));

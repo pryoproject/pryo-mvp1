@@ -1,90 +1,58 @@
 # Pryo MVP 1
 
-Pryo turns a public website URL into an evidence-backed, prioritized marketing action plan.
+Pryo turns a public website URL into an evidence-backed, prioritized marketing decision map.
 
-## Current vertical slice — v0.3
+## Current vertical slice — v0.4 Deep Snapshot
 
-`URL -> queued audit -> safe crawl -> deterministic evidence -> AI business context + positioning -> decisions -> persisted report`
+`URL -> safe multi-page crawl -> structural checks -> PageSpeed lab -> AI positioning -> verified evidence -> findings -> root causes -> priorities -> persisted report`
 
-### What changed in v0.3
+### What changed in v0.4
 
-- PostgreSQL persistence for audit state, reports, evidence and findings
-- Redis + BullMQ audit queue
-- separate worker process
-- asynchronous progress flow instead of a long browser request
-- OpenAI Responses API with strict JSON Schema output
-- homepage content is explicitly treated as untrusted data
-- AI evidence quotes are checked against the crawled page before they can receive high confidence
-- business context detection: company, business model, category, product, audience, market and conversion goal
-- positioning analysis: audience clarity, offer clarity, outcome clarity, differentiation and proof
-- `PRESERVE` findings have no ICE priority
-- the previous global-looking Health score is now an `Observed score`
-- Growth Potential remains intentionally `Not scored yet` until market/competitor coverage exists
+- crawls up to 6 high-value marketing pages instead of homepage only
+- automatically prioritizes pricing, product/features, solutions, customer, integration and about pages
+- keeps SSRF/DNS/redirect protections on every crawled URL
+- adds Google PageSpeed mobile Lighthouse signals when available
+- makes `PRESERVE` evidence-gated instead of accepting a single AI-positive assessment
+- verifies every AI quote against the actual crawled page before treating it as observed evidence
+- groups related findings into root causes before ranking actions
+- exposes the exact evidence scope and source pages in the report
+- calculates coverage dynamically; market/competitor/AEO/first-party layers remain intentionally outside the score
 
-## Repository
+## Architecture
 
-- `apps/web` — Next.js UI and API
+- `apps/web` — Next.js UI + audit APIs
 - `apps/worker` — BullMQ audit worker
-- `packages/domain` — shared schemas
-- `packages/crawler` — SSRF-oriented public homepage crawler
-- `packages/audit-engine` — deterministic checks
-- `packages/scoring` — score calculations
+- `packages/domain` — report/evidence/root-cause schemas
+- `packages/crawler` — SSRF-safe multi-page crawler
+- `packages/audit-engine` — deterministic multi-page SEO/CRO checks
+- `packages/performance` — optional PageSpeed/Lighthouse adapter
+- `packages/ai` — evidence-first context + positioning analysis
+- `packages/pipeline` — orchestration + root-cause grouping
 - `packages/db` — PostgreSQL persistence
 - `packages/queue` — Redis/BullMQ queue
-- `packages/ai` — OpenAI structured intelligence
-- `packages/pipeline` — end-to-end audit orchestration
+- `packages/scoring` — health, confidence, ICE and priority scoring
 
-## Required environment variables
+## Railway services
 
-```bash
-DATABASE_URL=
-REDIS_URL=
-OPENAI_API_KEY=
-```
+The current production topology remains unchanged:
+
+1. Web service — `railway.json`
+2. Worker service — `railway.worker.json`
+3. PostgreSQL
+4. Redis
+
+Required variables on Web and Worker:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `OPENAI_API_KEY`
 
 Optional:
 
-```bash
-OPENAI_MODEL=gpt-5.6-luna
-WORKER_CONCURRENCY=2
-```
+- `OPENAI_MODEL` (defaults to `gpt-5.6-luna`)
+- `PAGESPEED_API_KEY` for more reliable Google PageSpeed quota
+- `WORKER_CONCURRENCY` on the worker
 
-## Railway deployment
+## v0.5 target
 
-Pryo v0.3 requires **two application services** using the same GitHub repository plus PostgreSQL and Redis.
-
-### Web service
-
-Keep the existing service and root `railway.json`:
-
-- build: `pnpm build`
-- start: `pnpm start`
-- health: `/api/health`
-
-It needs `DATABASE_URL`, `REDIS_URL`, and `OPENAI_API_KEY`.
-
-### Worker service
-
-Create another Railway service from the same repository. Keep the repository root as its root directory and set:
-
-- build command: `pnpm build`
-- start command: `pnpm worker:start`
-- no public domain is needed
-
-Give the worker the same `DATABASE_URL`, `REDIS_URL`, and `OPENAI_API_KEY`. `railway.worker.json` documents the intended worker configuration, but Railway service settings may be used directly.
-
-## Local development
-
-Requires Node.js 24 and Corepack.
-
-```bash
-corepack enable
-pnpm install
-pnpm dev
-```
-
-Run the worker in a second terminal:
-
-```bash
-pnpm worker:start
-```
+Next: market demand + competitor discovery/benchmarking + gap engine using external market/SERP data providers.

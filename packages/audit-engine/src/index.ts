@@ -1,6 +1,6 @@
 import type { AuditArea, AuditCheck, CategoryScore, Evidence, Finding } from "@pryo/domain";
 import { ice, priorityScore, weightedConfidence, weightedHealth } from "@pryo/scoring";
-import type { PageSnapshot } from "@pryo/crawler";
+import type { PageSnapshot, SiteSnapshot } from "@pryo/crawler";
 
 interface CheckDefinition {
   code: string;
@@ -29,255 +29,111 @@ interface CheckDefinition {
 
 function ids(auditId: string, code: string) {
   const slug = code.toLowerCase();
-  return {
-    checkId: `${auditId}:${slug}:check`,
-    evidenceId: `${auditId}:${slug}:evidence`,
-    findingId: `${auditId}:${slug}:finding`,
-    recommendationId: `${auditId}:${slug}:recommendation`
-  };
+  return { checkId: `${auditId}:${slug}:check`, evidenceId: `${auditId}:${slug}:evidence`, findingId: `${auditId}:${slug}:finding`, recommendationId: `${auditId}:${slug}:recommendation` };
 }
 
-function buildDefinitions(page: PageSnapshot): CheckDefinition[] {
-  const oneH1 = page.h1.length === 1;
-  const hasTitle = Boolean(page.title);
-  const hasDescription = Boolean(page.description);
-  const hasCta = page.ctas.length > 0;
-  const enoughCopy = page.wordCount >= 100;
-  const htmlWeightOk = page.htmlBytes <= 750_000;
-  const responseTimeOk = page.responseTimeMs <= 2_000;
+function pageLabel(page: PageSnapshot) {
+  try { return `${page.kind}: ${new URL(page.url).pathname || "/"}`; }
+  catch { return `${page.kind}: ${page.url}`; }
+}
+
+function buildDefinitions(site: SiteSnapshot): CheckDefinition[] {
+  const pages = site.pages;
+  const missingTitles = pages.filter((page) => !page.title);
+  const missingH1 = pages.filter((page) => page.h1.length === 0);
+  const multipleH1 = pages.filter((page) => page.h1.length > 1);
+  const missingDescriptions = pages.filter((page) => !page.description);
+  const titles = pages.map((page) => page.title?.toLowerCase().trim()).filter(Boolean) as string[];
+  const duplicateTitles = titles.filter((value, index) => titles.indexOf(value) !== index);
+  const intentPages = pages.filter((page) => ["homepage", "pricing", "product", "features", "solutions"].includes(page.kind));
+  const intentWithoutCta = intentPages.filter((page) => page.ctas.length === 0);
+
+  const titleCoverage = Math.round(((pages.length - missingTitles.length) / pages.length) * 100);
+  const h1Coverage = Math.round(((pages.length - missingH1.length) / pages.length) * 100);
+  const descriptionCoverage = Math.round(((pages.length - missingDescriptions.length) / pages.length) * 100);
+  const ctaCoverage = intentPages.length ? Math.round(((intentPages.length - intentWithoutCta.length) / intentPages.length) * 100) : 0;
 
   return [
     {
-      code: "SEO_TITLE_PRESENT",
-      area: "seo",
-      label: "Homepage title",
-      passed: hasTitle,
-      score: hasTitle ? 100 : 25,
-      confidence: 1,
-      weight: 1,
-      evidence: hasTitle ? `Title detected: ${page.title}` : "No <title> element with text was detected.",
-      finding: hasTitle
-        ? undefined
-        : {
-            title: "Homepage title is missing",
-            description: "The homepage does not expose a usable document title for search results and browser context.",
-            impact: 6,
-            ease: 10,
-            status: "important",
-            decision: "do_now",
-            recommendation: "Add a concise homepage title that states the product or company and its primary category.",
-            validation: "Re-run Pryo and confirm the title is detected, then verify the rendered search snippet when indexed.",
-            affectedKpis: ["organic_ctr", "search_visibility"],
-            timeToSignal: "2–6 weeks"
-          }
+      code: "SEO_TITLE_COVERAGE", area: "seo", label: "Title coverage", passed: missingTitles.length === 0, score: titleCoverage,
+      confidence: 1, weight: 1.1, evidenceType: "measured",
+      evidence: missingTitles.length ? `${missingTitles.length}/${pages.length} crawled pages are missing a document title: ${missingTitles.map(pageLabel).join(" | ")}` : `All ${pages.length} crawled pages expose a document title.`,
+      finding: missingTitles.length ? {
+        title: "Some key pages are missing document titles", description: "Missing titles weaken search-result context and make page purpose less explicit to search systems.",
+        impact: 6, ease: 9, status: "important", decision: "do_now", recommendation: "Add concise, page-specific titles to the affected crawled pages.",
+        validation: "Re-run Pryo and confirm every crawled key page exposes a unique document title.", affectedKpis: ["organic_ctr", "search_visibility"], timeToSignal: "2–6 weeks"
+      } : undefined
     },
     {
-      code: "SEO_META_DESCRIPTION_PRESENT",
-      area: "seo",
-      label: "Meta description",
-      passed: hasDescription,
-      score: hasDescription ? 100 : 60,
-      confidence: 1,
-      weight: 0.6,
-      evidence: hasDescription ? `Meta description detected: ${page.description}` : "No meta description was detected.",
-      finding: hasDescription
-        ? undefined
-        : {
-            title: "Meta description is missing",
-            description: "The homepage does not provide a meta description that can help shape the search-result message.",
-            impact: 4,
-            ease: 10,
-            status: "improve",
-            decision: "do_now",
-            recommendation: "Add a concise meta description aligned with the homepage intent and core value proposition.",
-            validation: "Re-run Pryo and confirm the meta description is detected.",
-            affectedKpis: ["organic_ctr"],
-            timeToSignal: "2–6 weeks"
-          }
+      code: "SEO_H1_COVERAGE", area: "seo", label: "Primary heading coverage", passed: missingH1.length === 0, score: h1Coverage,
+      confidence: 1, weight: 1, evidenceType: "measured",
+      evidence: missingH1.length ? `${missingH1.length}/${pages.length} crawled pages are missing an H1: ${missingH1.map(pageLabel).join(" | ")}` : `All ${pages.length} crawled pages expose at least one H1.`,
+      finding: missingH1.length ? {
+        title: "Some key pages have no primary H1", description: "The affected pages do not expose a primary heading that clearly anchors page meaning.",
+        impact: 6, ease: 8, status: "important", decision: "do_now", recommendation: "Add one descriptive primary H1 to each affected key page.",
+        validation: "Re-run Pryo and confirm the affected pages expose a primary H1.", affectedKpis: ["message_clarity", "search_visibility"], timeToSignal: "1–4 weeks"
+      } : undefined
     },
     {
-      code: "SEO_SINGLE_H1",
-      area: "seo",
-      label: "Primary H1 structure",
-      passed: oneH1,
-      score: oneH1 ? 100 : page.h1.length === 0 ? 25 : 65,
-      confidence: 1,
-      weight: 1,
-      evidence: page.h1.length === 0 ? "No H1 element was detected." : `${page.h1.length} H1 elements detected: ${page.h1.join(" | ")}`,
-      finding: oneH1
-        ? undefined
-        : page.h1.length === 0
-          ? {
-              title: "Primary H1 is missing",
-              description: "The homepage has no H1 heading, weakening page structure and making the primary message harder to identify programmatically.",
-              impact: 6,
-              ease: 9,
-              status: "important",
-              decision: "do_now",
-              recommendation: "Add one descriptive H1 that clearly states the primary offer or outcome.",
-              validation: "Re-run Pryo and confirm exactly one primary H1 is detected.",
-              affectedKpis: ["message_clarity", "search_visibility"],
-              timeToSignal: "1–4 weeks"
-            }
-          : {
-              title: "Homepage uses multiple H1 headings",
-              description: "Multiple primary headings can make the hierarchy of the page less explicit.",
-              impact: 3,
-              ease: 8,
-              status: "improve",
-              decision: "validate",
-              recommendation: "Review the heading hierarchy and keep one H1 for the primary page message unless the current structure is intentionally justified.",
-              validation: "Check the rendered page hierarchy and re-run Pryo after changes.",
-              affectedKpis: ["message_clarity"],
-              timeToSignal: "1–4 weeks"
-            }
+      code: "SEO_H1_HIERARCHY", area: "seo", label: "H1 hierarchy", passed: multipleH1.length === 0, score: multipleH1.length ? Math.max(55, 100 - multipleH1.length * 12) : 100,
+      confidence: 0.92, weight: 0.6, evidenceType: "observed",
+      evidence: multipleH1.length ? `${multipleH1.length} crawled page(s) use multiple H1 headings: ${multipleH1.map((page) => `${pageLabel(page)} (${page.h1.length})`).join(" | ")}` : "No crawled key page uses multiple H1 headings.",
+      finding: multipleH1.length ? {
+        title: "Some key pages use multiple H1 headings", description: "Multiple H1s are not automatically harmful, but the page hierarchy should be intentionally validated.",
+        impact: 3, ease: 7, status: "improve", decision: "validate", recommendation: "Review the heading hierarchy on the affected pages and keep one primary H1 where that better reflects the information structure.",
+        validation: "Validate the rendered hierarchy before changing markup, then re-run Pryo.", affectedKpis: ["message_clarity"], timeToSignal: "1–4 weeks"
+      } : undefined
     },
     {
-      code: "CRO_PRIMARY_CTA_PRESENT",
-      area: "cro",
-      label: "Action-oriented CTA",
-      passed: hasCta,
-      score: hasCta ? 100 : 20,
-      confidence: 0.9,
-      weight: 1.4,
-      evidence: hasCta ? `${page.ctas.length} CTA candidate(s) detected. Examples: ${page.ctas.slice(0, 5).join(" | ")}` : "No action-oriented button or link was detected by the homepage CTA heuristic.",
-      finding: hasCta
-        ? undefined
-        : {
-            title: "No clear action-oriented CTA was detected",
-            description: "The homepage does not expose an obvious next action through common CTA patterns. This should be visually validated before changing the page.",
-            impact: 10,
-            ease: 8,
-            status: "critical",
-            decision: "validate",
-            recommendation: "Inspect the hero and primary conversion path. If no clear primary CTA exists, add one tied directly to the main conversion action.",
-            validation: "Confirm the CTA visually, then compare click-through or conversion rate before and after any change.",
-            affectedKpis: ["cta_click_rate", "conversion_rate"],
-            timeToSignal: "1–3 weeks"
-          }
+      code: "SEO_META_COVERAGE", area: "seo", label: "Meta description coverage", passed: missingDescriptions.length === 0, score: descriptionCoverage,
+      confidence: 1, weight: 0.45, evidenceType: "measured",
+      evidence: missingDescriptions.length ? `${missingDescriptions.length}/${pages.length} crawled pages have no meta description.` : `All ${pages.length} crawled pages expose a meta description.`,
+      finding: missingDescriptions.length / pages.length >= 0.4 ? {
+        title: "Meta descriptions are missing across several key pages", description: "Several crawled pages do not provide a suggested search-result description.",
+        impact: 4, ease: 8, status: "improve", decision: "validate", recommendation: "Write distinct meta descriptions for high-intent pages where search snippets would benefit from a clearer message.",
+        validation: "Re-run Pryo and later check rendered search snippets rather than assuming Google will use the supplied text.", affectedKpis: ["organic_ctr"], timeToSignal: "2–6 weeks"
+      } : undefined
     },
     {
-      code: "CRO_EXPLANATORY_DEPTH",
-      area: "cro",
-      label: "Homepage explanatory depth",
-      passed: enoughCopy,
-      score: enoughCopy ? 100 : page.wordCount >= 60 ? 65 : 35,
-      confidence: 0.75,
-      weight: 0.8,
-      evidence: `Visible body text: approximately ${page.wordCount} words.`,
-      evidenceType: "measured",
-      finding: enoughCopy
-        ? undefined
-        : {
-            title: "Homepage may not explain enough before asking for action",
-            description: "The visible homepage contains very little text. That can be appropriate for some brands, so this is a validation item rather than an automatic defect.",
-            impact: 7,
-            ease: 7,
-            status: "important",
-            decision: "validate",
-            recommendation: "Review whether the page clearly explains the audience, value, proof and next step. Add content only where a specific decision question is currently unanswered.",
-            validation: "Use session/behavior data or a controlled copy test; do not add copy solely to increase word count.",
-            affectedKpis: ["conversion_rate", "engagement"],
-            timeToSignal: "2–4 weeks"
-          }
+      code: "SEO_TITLE_UNIQUENESS", area: "seo", label: "Title uniqueness", passed: duplicateTitles.length === 0, score: duplicateTitles.length ? Math.max(45, 100 - duplicateTitles.length * 18) : 100,
+      confidence: 1, weight: 0.8, evidenceType: "measured",
+      evidence: duplicateTitles.length ? `Duplicate page titles were detected across the crawled set.` : "Crawled page titles are unique within the current sample.",
+      finding: duplicateTitles.length ? {
+        title: "Duplicate titles reduce page-level distinction", description: "Multiple key pages use the same title, making their individual purpose less explicit.",
+        impact: 5, ease: 8, status: "improve", decision: "do_now", recommendation: "Differentiate titles so each key page states its specific intent and topic.",
+        validation: "Re-run Pryo and confirm titles are unique across the crawled key pages.", affectedKpis: ["organic_ctr", "search_visibility"], timeToSignal: "2–6 weeks"
+      } : undefined
     },
     {
-      code: "PERF_HTML_WEIGHT",
-      area: "performance",
-      label: "Homepage HTML weight",
-      passed: htmlWeightOk,
-      score: htmlWeightOk ? 100 : page.htmlBytes <= 1_500_000 ? 65 : 35,
-      confidence: 1,
-      weight: 0.7,
-      evidence: `Downloaded HTML: ${Math.round(page.htmlBytes / 1024)} KB.`,
-      evidenceType: "measured",
-      finding: htmlWeightOk
-        ? undefined
-        : {
-            title: "Homepage HTML payload is unusually large",
-            description: "A heavy HTML document increases transfer and parsing work before images, scripts and other assets are considered.",
-            impact: 5,
-            ease: 5,
-            status: "important",
-            decision: "validate",
-            recommendation: "Inspect server-rendered markup for duplicated content, oversized inline data or unnecessary generated HTML before optimizing assets.",
-            validation: "Measure transferred HTML bytes and Core Web Vitals after remediation.",
-            affectedKpis: ["page_speed", "conversion_rate"],
-            timeToSignal: "Immediate"
-          }
-    },
-    {
-      code: "PERF_ORIGIN_RESPONSE",
-      area: "performance",
-      label: "Audit fetch response time",
-      passed: responseTimeOk,
-      score: responseTimeOk ? 100 : page.responseTimeMs <= 4_000 ? 60 : 30,
-      confidence: 0.55,
-      weight: 0.5,
-      evidence: `Pryo's server received the homepage response after approximately ${page.responseTimeMs} ms including redirects and network distance.`,
-      evidenceType: "measured",
-      finding: responseTimeOk
-        ? undefined
-        : {
-            title: "Homepage response was slow from the audit location",
-            description: "The audit request took longer than expected, but this is not a substitute for real-user Core Web Vitals and should be validated with PageSpeed/CrUX.",
-            impact: 6,
-            ease: 5,
-            status: "important",
-            decision: "validate",
-            recommendation: "Validate server and page performance with PageSpeed/CrUX before prioritizing infrastructure changes.",
-            validation: "Run PageSpeed/CrUX and compare server response and Core Web Vitals across mobile and desktop.",
-            affectedKpis: ["page_speed", "conversion_rate"],
-            timeToSignal: "Immediate"
-          }
+      code: "CRO_ACTION_PATH_COVERAGE", area: "cro", label: "Action path coverage", passed: intentWithoutCta.length === 0, score: ctaCoverage,
+      confidence: 0.88, weight: 1.2, evidenceType: "observed",
+      evidence: intentWithoutCta.length ? `${intentWithoutCta.length}/${intentPages.length} high-intent crawled page(s) expose no CTA candidate: ${intentWithoutCta.map(pageLabel).join(" | ")}` : `All ${intentPages.length} crawled high-intent pages expose at least one CTA candidate.`,
+      finding: intentWithoutCta.length ? {
+        title: "Some high-intent pages may lack an obvious next step", description: "Pryo did not detect an action-oriented CTA on one or more high-intent pages. Visual confirmation is required before changing them.",
+        impact: 8, ease: 7, status: "important", decision: "validate", recommendation: "Visually inspect the affected high-intent pages and add or clarify a primary next step only where the path is genuinely ambiguous.",
+        validation: "Confirm the CTA visually and compare click-through or conversion behavior before and after any change.", affectedKpis: ["cta_click_rate", "conversion_rate"], timeToSignal: "1–3 weeks"
+      } : undefined
     }
   ];
 }
 
 function makeFinding(auditId: string, definition: CheckDefinition, evidenceId: string, now: string): Finding | undefined {
   if (!definition.finding) return undefined;
-
   const { finding } = definition;
   const confidence = Math.max(1, Math.min(10, Math.round(definition.confidence * 10)));
-  const nonAction = finding.decision === "preserve" || finding.decision === "ignore";
+  const nonAction = finding.decision === "preserve" || finding.decision === "ignore" || finding.decision === "monitor";
   const iceScore = nonAction ? 0 : ice(finding.impact, confidence, finding.ease);
   const reference = ids(auditId, definition.code);
-
   return {
-    id: reference.findingId,
-    auditId,
-    area: definition.area,
-    code: definition.code,
-    title: finding.title,
-    description: finding.description,
-    status: finding.status,
-    decision: finding.decision,
+    id: reference.findingId, auditId, area: definition.area, code: definition.code, title: finding.title, description: finding.description, status: finding.status, decision: finding.decision,
     evidenceIds: [evidenceId],
     recommendation: {
-      id: reference.recommendationId,
-      title: finding.recommendation,
-      action: finding.recommendation,
-      validation: finding.validation,
-      dependencies: [],
-      affectedKpis: finding.affectedKpis,
-      estimatedEffort: finding.ease >= 9 ? "xs" : finding.ease >= 7 ? "s" : finding.ease >= 5 ? "m" : "l",
-      timeToSignal: finding.timeToSignal
+      id: reference.recommendationId, title: finding.recommendation, action: finding.recommendation, validation: finding.validation, dependencies: [], affectedKpis: finding.affectedKpis,
+      estimatedEffort: finding.ease >= 9 ? "xs" : finding.ease >= 7 ? "s" : finding.ease >= 5 ? "m" : "l", timeToSignal: finding.timeToSignal
     },
-    scores: {
-      impact: nonAction ? 0 : finding.impact,
-      confidence,
-      ease: nonAction ? 0 : finding.ease,
-      ice: iceScore,
-      urgency: 1,
-      unlock: 1,
-      priority: nonAction ? 0 : priorityScore(iceScore)
-    },
-    affectedKpis: finding.affectedKpis,
-    dependencies: [],
-    expectedOutcome: "Reduce a measured or observed constraint without introducing unverified business claims.",
-    timeToSignal: finding.timeToSignal,
-    validationMethod: finding.validation,
-    createdAt: now
+    scores: { impact: nonAction ? 0 : finding.impact, confidence, ease: nonAction ? 0 : finding.ease, ice: iceScore, urgency: 1, unlock: 1, priority: nonAction ? 0 : priorityScore(iceScore) },
+    affectedKpis: finding.affectedKpis, dependencies: [], expectedOutcome: "Reduce an observed constraint without introducing unverified business claims.",
+    timeToSignal: finding.timeToSignal, validationMethod: finding.validation, createdAt: now
   };
 }
 
@@ -285,90 +141,48 @@ function categoryScores(checks: AuditCheck[]): CategoryScore[] {
   const areas = [...new Set(checks.map((check) => check.area))];
   return areas.map((area) => {
     const areaChecks = checks.filter((check) => check.area === area);
-    return {
-      area,
-      score: weightedHealth(areaChecks),
-      confidence: weightedConfidence(areaChecks),
-      coverage: 100
-    };
+    return { area, score: weightedHealth(areaChecks), confidence: weightedConfidence(areaChecks), coverage: 100 };
   });
 }
 
-export function runHomepageChecks(auditId: string, page: PageSnapshot) {
+export function runSiteChecks(auditId: string, site: SiteSnapshot) {
   const now = new Date().toISOString();
-  const definitions = buildDefinitions(page);
+  const definitions = buildDefinitions(site);
   const evidence: Evidence[] = [];
   const checks: AuditCheck[] = [];
   const findings: Finding[] = [];
 
   for (const definition of definitions) {
     const reference = ids(auditId, definition.code);
-
     evidence.push({
-      id: reference.evidenceId,
-      type: definition.evidenceType || "observed",
-      sourceProvider: "pryo_crawler",
-      sourceUrl: page.url,
-      observedAt: now,
-      reliability: definition.confidence,
-      excerpt: definition.evidence,
-      data: definition.metadata || {}
+      id: reference.evidenceId, type: definition.evidenceType || "observed", sourceProvider: "pryo_crawler", sourceUrl: site.homepage.url, observedAt: now,
+      reliability: definition.confidence, excerpt: definition.evidence, data: definition.metadata || { pagesAnalyzed: site.pages.length }
     });
-
     checks.push({
-      id: reference.checkId,
-      code: definition.code,
-      area: definition.area,
-      label: definition.label,
-      passed: definition.passed,
-      score: definition.score,
-      confidence: definition.confidence,
-      weight: definition.weight,
-      evidenceIds: [reference.evidenceId],
-      metadata: definition.metadata || {}
+      id: reference.checkId, code: definition.code, area: definition.area, label: definition.label, passed: definition.passed, score: definition.score,
+      confidence: definition.confidence, weight: definition.weight, evidenceIds: [reference.evidenceId], metadata: definition.metadata || { pagesAnalyzed: site.pages.length }
     });
-
     const finding = makeFinding(auditId, definition, reference.evidenceId, now);
     if (finding) findings.push(finding);
   }
 
-  if (page.h1.length === 1 && page.ctas.length >= 1) {
+  const intentPages = site.pages.filter((page) => ["homepage", "pricing", "product", "features", "solutions"].includes(page.kind));
+  const structurallyClear = intentPages.length >= 2 && intentPages.every((page) => page.h1.length >= 1 && page.ctas.length >= 1);
+  if (structurallyClear) {
     const code = "CRO_STRUCTURE_STRONG";
     const reference = ids(auditId, code);
-    evidence.push({
-      id: reference.evidenceId,
-      type: "observed",
-      sourceProvider: "pryo_crawler",
-      sourceUrl: page.url,
-      observedAt: now,
-      reliability: 0.9,
-      excerpt: `One H1 and ${page.ctas.length} action-oriented CTA candidate(s) detected.`,
-      data: {}
-    });
+    evidence.push({ id: reference.evidenceId, type: "observed", sourceProvider: "pryo_crawler", sourceUrl: site.homepage.url, observedAt: now, reliability: 0.9, excerpt: `${intentPages.length} crawled high-intent pages expose both a primary heading and at least one CTA candidate.`, data: { pageKinds: intentPages.map((page) => page.kind) } });
     findings.push({
-      id: reference.findingId,
-      auditId,
-      area: "cro",
-      code,
-      title: "Homepage exposes a clear structural path to action",
-      description: "The crawler detected one primary H1 and at least one action-oriented CTA. Preserve this structural clarity when changing the page.",
-      status: "strong",
-      decision: "preserve",
-      evidenceIds: [reference.evidenceId],
-      scores: { impact: 5, confidence: 9, ease: 10, ice: 450, urgency: 1, unlock: 1, priority: 45 },
-      affectedKpis: ["conversion_rate"],
-      dependencies: [],
-      expectedOutcome: "Preserve structural clarity during future iterations.",
-      createdAt: now
+      id: reference.findingId, auditId, area: "cro", code, title: "Key pages preserve a clear structural path to action", description: "Across the crawled high-intent sample, Pryo consistently detected a primary heading and an action-oriented CTA. Preserve that structure during redesigns.",
+      status: "strong", decision: "preserve", evidenceIds: [reference.evidenceId], scores: { impact: 0, confidence: 9, ease: 0, ice: 0, urgency: 1, unlock: 1, priority: 0 },
+      affectedKpis: ["conversion_rate"], dependencies: [], expectedOutcome: "Preserve structural clarity across key conversion pages.", createdAt: now
     });
   }
 
-  return {
-    checks,
-    evidence,
-    findings,
-    categories: categoryScores(checks),
-    health: weightedHealth(checks),
-    confidence: weightedConfidence(checks)
-  };
+  return { checks, evidence, findings, categories: categoryScores(checks), health: weightedHealth(checks), confidence: weightedConfidence(checks) };
+}
+
+export function runHomepageChecks(auditId: string, page: PageSnapshot) {
+  const site: SiteSnapshot = { homepage: page, pages: [page], failedPages: [], discoveredCount: 0 };
+  return runSiteChecks(auditId, site);
 }
