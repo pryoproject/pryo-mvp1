@@ -1,0 +1,16 @@
+{
+  "name": "@pryo/audit-engine",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pryo/domain": "workspace:*",
+    "@pryo/scoring": "workspace:*",
+    "@pryo/crawler": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

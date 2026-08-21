@@ -1,0 +1,1 @@
+{"name":"@pryo/worker","version":"0.0.1","private":true,"type":"module","scripts":{"dev":"tsx watch src/index.ts","build":"tsc -p tsconfig.json","typecheck":"tsc --noEmit"},"dependencies":{"tsx":"^4.20.5"},"devDependencies":{"typescript":"^5.9.2","@types/node":"^24.3.0"}}
