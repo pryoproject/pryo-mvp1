@@ -1,406 +1,209 @@
-import type { Evidence, Finding, RootCause } from "@pryo/domain";
-import { ice, priorityScore } from "@pryo/scoring";
+import { z } from "zod";
 
-export interface MarketKeyword {
-  keyword: string;
-  searchVolume?: number;
-  cpc?: number;
-  competition?: string;
-  competitionIndex?: number;
-  monthlyTrendPct?: number;
-}
+export const AuditAreaSchema = z.enum([
+  "positioning",
+  "cro",
+  "seo",
+  "performance",
+  "market",
+  "competition",
+  "technology",
+  "ai_discoverability"
+]);
+export type AuditArea = z.infer<typeof AuditAreaSchema>;
 
-export interface SearchCompetitor {
-  domain: string;
-  intersections: number;
-  avgPosition?: number;
-  organicKeywords?: number;
-  organicEtv?: number;
-}
+export const FindingStatusSchema = z.enum([
+  "strong",
+  "improve",
+  "important",
+  "critical",
+  "insufficient_data"
+]);
+export type FindingStatus = z.infer<typeof FindingStatusSchema>;
 
-export interface KeywordGap {
-  competitorDomain: string;
-  keyword: string;
-  searchVolume?: number;
-  cpc?: number;
-  competitorPosition?: number;
-}
+export const DecisionSchema = z.enum(["do_now", "validate", "preserve", "monitor", "ignore"]);
+export type Decision = z.infer<typeof DecisionSchema>;
 
-export interface MarketIntelligenceResult {
-  available: boolean;
-  provider: "dataforseo" | "unavailable";
-  targetDomain: string;
-  locationName: string;
-  languageName: string;
-  keywords: MarketKeyword[];
-  competitors: SearchCompetitor[];
-  gaps: KeywordGap[];
-  fetchedAt: string;
-  errorCode?: "NOT_CONFIGURED" | "PROVIDER_ERROR";
-}
+export const EvidenceSchema = z.object({
+  id: z.string(),
+  type: z.enum(["measured", "observed", "inferred"]),
+  sourceProvider: z.string(),
+  sourceUrl: z.string().url().optional(),
+  observedAt: z.string(),
+  reliability: z.number().min(0).max(1),
+  excerpt: z.string().optional(),
+  data: z.record(z.string(), z.unknown()).default({})
+});
+export type Evidence = z.infer<typeof EvidenceSchema>;
 
-export interface MarketArtifacts {
-  result: MarketIntelligenceResult;
-  evidence: Evidence[];
-  findings: Finding[];
-  rootCauses: RootCause[];
-}
+export const AuditCheckSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  area: AuditAreaSchema,
+  label: z.string(),
+  passed: z.boolean().nullable(),
+  score: z.number().min(0).max(100),
+  confidence: z.number().min(0).max(1),
+  weight: z.number().positive(),
+  evidenceIds: z.array(z.string()),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+export type AuditCheck = z.infer<typeof AuditCheckSchema>;
 
-interface DataForSeoResponse {
-  status_code?: number;
-  status_message?: string;
-  cost?: number;
-  tasks?: Array<{
-    status_code?: number;
-    status_message?: string;
-    cost?: number;
-    result?: unknown[];
-  }>;
-}
+export const RecommendationSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  action: z.string(),
+  validation: z.string(),
+  ownerType: z.string().optional(),
+  dependencies: z.array(z.string()).default([]),
+  affectedKpis: z.array(z.string()).default([]),
+  estimatedEffort: z.enum(["xs", "s", "m", "l", "xl"]),
+  timeToSignal: z.string().optional()
+});
+export type Recommendation = z.infer<typeof RecommendationSchema>;
 
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
+export const FindingSchema = z.object({
+  id: z.string(),
+  auditId: z.string(),
+  area: AuditAreaSchema,
+  code: z.string(),
+  title: z.string(),
+  description: z.string(),
+  status: FindingStatusSchema,
+  decision: DecisionSchema,
+  rootCauseId: z.string().optional(),
+  evidenceIds: z.array(z.string()).min(1),
+  recommendation: RecommendationSchema.optional(),
+  scores: z.object({
+    impact: z.number().min(0).max(10),
+    confidence: z.number().min(0).max(10),
+    ease: z.number().min(0).max(10),
+    ice: z.number().min(0).max(1000),
+    urgency: z.number().min(0.5).max(1.5),
+    unlock: z.number().min(1).max(1.25),
+    priority: z.number().min(0).max(100)
+  }),
+  affectedKpis: z.array(z.string()).default([]),
+  dependencies: z.array(z.string()).default([]),
+  expectedOutcome: z.string().optional(),
+  timeToSignal: z.string().optional(),
+  validationMethod: z.string().optional(),
+  createdAt: z.string()
+});
+export type Finding = z.infer<typeof FindingSchema>;
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
+export const RootCauseSchema = z.object({
+  id: z.string(),
+  area: AuditAreaSchema,
+  title: z.string(),
+  description: z.string(),
+  findingIds: z.array(z.string()).min(1),
+  evidenceIds: z.array(z.string()),
+  decision: DecisionSchema,
+  status: FindingStatusSchema,
+  confidence: z.number().min(0).max(100),
+  priority: z.number().min(0).max(100),
+  action: z.string(),
+  validation: z.string(),
+  timeToSignal: z.string().optional()
+});
+export type RootCause = z.infer<typeof RootCauseSchema>;
 
-function configuration() {
-  const login = process.env.DATAFORSEO_LOGIN?.trim();
-  const password = process.env.DATAFORSEO_PASSWORD?.trim();
-  const locationName = process.env.DATAFORSEO_LOCATION_NAME?.trim() || "United States";
-  const languageName = process.env.DATAFORSEO_LANGUAGE_NAME?.trim() || "English";
-  return { login, password, locationName, languageName };
-}
+export const CategoryScoreSchema = z.object({
+  area: AuditAreaSchema,
+  score: z.number().min(0).max(100),
+  confidence: z.number().min(0).max(100),
+  coverage: z.number().min(0).max(100)
+});
+export type CategoryScore = z.infer<typeof CategoryScoreSchema>;
 
-function targetDomain(url: string) {
-  return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-}
+export const ProjectContextSchema = z.object({
+  company: z.string(),
+  canonicalUrl: z.string().url(),
+  businessModel: z.string().optional(),
+  category: z.string().optional(),
+  product: z.string().optional(),
+  targetAudience: z.array(z.string()).default([]),
+  market: z.array(z.string()).default([]),
+  primaryConversion: z.string().optional(),
+  language: z.string().optional(),
+  confidence: z.number().min(0).max(1)
+});
+export type ProjectContext = z.infer<typeof ProjectContextSchema>;
 
-function monthlyTrendPct(monthlySearches: unknown): number | undefined {
-  if (!Array.isArray(monthlySearches)) return undefined;
-  const values = monthlySearches
-    .map((item) => numberOrUndefined((item as Record<string, unknown>)?.search_volume))
-    .filter((value): value is number => value !== undefined);
-  if (values.length < 2) return undefined;
-  const newest = values[0];
-  const oldest = values[values.length - 1];
-  if (oldest <= 0) return undefined;
-  return Math.round(((newest - oldest) / oldest) * 100);
-}
+export const MarketKeywordSchema = z.object({
+  keyword: z.string(),
+  searchVolume: z.number().nonnegative().optional(),
+  cpc: z.number().nonnegative().optional(),
+  competition: z.string().optional(),
+  competitionIndex: z.number().min(0).max(100).optional(),
+  monthlyTrendPct: z.number().optional()
+});
+export type MarketKeyword = z.infer<typeof MarketKeywordSchema>;
 
-async function postDataForSeo(path: string, payload: Record<string, unknown>) {
-  const config = configuration();
-  if (!config.login || !config.password) throw new Error("DataForSEO credentials are not configured");
+export const SearchCompetitorSchema = z.object({
+  domain: z.string(),
+  intersections: z.number().int().nonnegative(),
+  avgPosition: z.number().nonnegative().optional(),
+  organicKeywords: z.number().int().nonnegative().optional(),
+  organicEtv: z.number().nonnegative().optional()
+});
+export type SearchCompetitor = z.infer<typeof SearchCompetitorSchema>;
 
-  const response = await fetch(`https://api.dataforseo.com${path}`, {
-    method: "POST",
-    signal: AbortSignal.timeout(30_000),
-    headers: {
-      authorization: `Basic ${Buffer.from(`${config.login}:${config.password}`).toString("base64")}`,
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify([payload])
-  });
+export const KeywordGapSchema = z.object({
+  competitorDomain: z.string(),
+  keyword: z.string(),
+  searchVolume: z.number().nonnegative().optional(),
+  cpc: z.number().nonnegative().optional(),
+  competitorPosition: z.number().nonnegative().optional()
+});
+export type KeywordGap = z.infer<typeof KeywordGapSchema>;
 
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`DataForSEO returned HTTP ${response.status}`);
+export const MarketIntelligenceSchema = z.object({
+  available: z.boolean(),
+  provider: z.enum(["dataforseo", "unavailable"]),
+  targetDomain: z.string(),
+  locationName: z.string(),
+  languageName: z.string(),
+  keywords: z.array(MarketKeywordSchema).default([]),
+  competitors: z.array(SearchCompetitorSchema).default([]),
+  gaps: z.array(KeywordGapSchema).default([]),
+  fetchedAt: z.string(),
+  errorCode: z.enum(["NOT_CONFIGURED", "PROVIDER_ERROR"]).optional()
+});
+export type MarketIntelligence = z.infer<typeof MarketIntelligenceSchema>;
 
-  let data: DataForSeoResponse;
-  try { data = JSON.parse(raw) as DataForSeoResponse; }
-  catch { throw new Error("DataForSEO returned invalid JSON"); }
+export const AuditScopeSchema = z.object({
+  pagesAnalyzed: z.number().int().min(1),
+  pages: z.array(z.object({
+    url: z.string().url(),
+    kind: z.string(),
+    title: z.string().optional()
+  })),
+  performanceAvailable: z.boolean(),
+  performanceSource: z.enum(["pagespeed_lab", "unavailable"]),
+  marketAvailable: z.boolean().default(false),
+  marketSource: z.enum(["dataforseo", "unavailable"]).default("unavailable")
+});
+export type AuditScope = z.infer<typeof AuditScopeSchema>;
 
-  if (data.status_code !== 20000) {
-    throw new Error(data.status_message || `DataForSEO request failed (${data.status_code || "unknown"})`);
-  }
-
-  const task = data.tasks?.[0];
-  if (!task || task.status_code !== 20000) {
-    throw new Error(task?.status_message || `DataForSEO task failed (${task?.status_code || "unknown"})`);
-  }
-
-  return {
-    result: task.result || [],
-    costUsd: (numberOrUndefined(data.cost) || 0) + (numberOrUndefined(task.cost) || 0)
-  };
-}
-
-async function fetchDemand(domain: string, locationName: string, languageName: string) {
-  const response = await postDataForSeo("/v3/keywords_data/google_ads/keywords_for_site/live", {
-    target: domain,
-    target_type: "site",
-    location_name: locationName,
-    language_name: languageName,
-    sort_by: "search_volume",
-    include_adult_keywords: false
-  });
-
-  const keywords = response.result
-    .map((raw) => raw as Record<string, unknown>)
-    .map((item): MarketKeyword | undefined => {
-      const keyword = stringOrUndefined(item.keyword);
-      if (!keyword) return undefined;
-      return {
-        keyword,
-        searchVolume: numberOrUndefined(item.search_volume),
-        cpc: numberOrUndefined(item.cpc),
-        competition: stringOrUndefined(item.competition),
-        competitionIndex: numberOrUndefined(item.competition_index),
-        monthlyTrendPct: monthlyTrendPct(item.monthly_searches)
-      };
-    })
-    .filter((item): item is MarketKeyword => Boolean(item))
-    .sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0))
-    .slice(0, 20);
-
-  return { keywords, costUsd: response.costUsd };
-}
-
-async function fetchCompetitors(domain: string, locationName: string, languageName: string) {
-  const response = await postDataForSeo("/v3/dataforseo_labs/google/competitors_domain/live", {
-    target: domain,
-    location_name: locationName,
-    language_name: languageName,
-    item_types: ["organic"],
-    exclude_top_domains: true,
-    exclude_domains: [domain],
-    max_rank_group: 20,
-    limit: 8,
-    order_by: ["metrics.organic.count,desc"]
-  });
-
-  const first = response.result[0] as Record<string, unknown> | undefined;
-  const items = Array.isArray(first?.items) ? first.items : [];
-  const competitors = items
-    .map((raw) => raw as Record<string, unknown>)
-    .map((item): SearchCompetitor | undefined => {
-      const competitorDomain = stringOrUndefined(item.domain);
-      if (!competitorDomain || competitorDomain === domain) return undefined;
-      const fullDomainMetrics = item.full_domain_metrics as Record<string, unknown> | undefined;
-      const organic = fullDomainMetrics?.organic as Record<string, unknown> | undefined;
-      return {
-        domain: competitorDomain,
-        intersections: numberOrUndefined(item.intersections) || 0,
-        avgPosition: numberOrUndefined(item.avg_position),
-        organicKeywords: numberOrUndefined(organic?.count),
-        organicEtv: numberOrUndefined(organic?.etv)
-      };
-    })
-    .filter((item): item is SearchCompetitor => Boolean(item))
-    .slice(0, 5);
-
-  return { competitors, costUsd: response.costUsd };
-}
-
-async function fetchGaps(domain: string, competitors: SearchCompetitor[], locationName: string, languageName: string) {
-  const gaps: KeywordGap[] = [];
-  let costUsd = 0;
-
-  for (const competitor of competitors.slice(0, 2)) {
-    try {
-      const response = await postDataForSeo("/v3/dataforseo_labs/google/domain_intersection/live", {
-        target1: competitor.domain,
-        target2: domain,
-        location_name: locationName,
-        language_name: languageName,
-        intersections: false,
-        item_types: ["organic"],
-        limit: 10,
-        order_by: ["keyword_data.keyword_info.search_volume,desc"]
-      });
-      costUsd += response.costUsd;
-      const first = response.result[0] as Record<string, unknown> | undefined;
-      const items = Array.isArray(first?.items) ? first.items : [];
-      for (const raw of items) {
-        const item = raw as Record<string, unknown>;
-        const keywordData = item.keyword_data as Record<string, unknown> | undefined;
-        const keywordInfo = keywordData?.keyword_info as Record<string, unknown> | undefined;
-        const firstSerp = item.first_domain_serp_element as Record<string, unknown> | undefined;
-        const keyword = stringOrUndefined(keywordData?.keyword);
-        if (!keyword) continue;
-        gaps.push({
-          competitorDomain: competitor.domain,
-          keyword,
-          searchVolume: numberOrUndefined(keywordInfo?.search_volume),
-          cpc: numberOrUndefined(keywordInfo?.cpc),
-          competitorPosition: numberOrUndefined(firstSerp?.rank_group) || numberOrUndefined(firstSerp?.rank_absolute)
-        });
-      }
-    } catch {
-      // Keep the rest of the market audit usable if one competitor gap call fails.
-    }
-  }
-
-  const deduped = [...new Map(
-    gaps
-      .sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0))
-      .map((gap) => [`${gap.competitorDomain}:${gap.keyword.toLowerCase()}`, gap])
-  ).values()].slice(0, 15);
-
-  return { gaps: deduped, costUsd };
-}
-
-function evidenceArtifacts(auditId: string, result: MarketIntelligenceResult): Evidence[] {
-  if (!result.available) return [];
-  const observedAt = result.fetchedAt;
-  const evidence: Evidence[] = [];
-
-  if (result.keywords.length) {
-    evidence.push({
-      id: `${auditId}:market:demand:evidence`,
-      type: "measured",
-      sourceProvider: "dataforseo_google_ads",
-      observedAt,
-      reliability: 0.82,
-      excerpt: `Top observed demand terms include ${result.keywords.slice(0, 5).map((item) => `${item.keyword}${item.searchVolume === undefined ? "" : ` (${item.searchVolume}/mo)`}`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, keywords: result.keywords }
-    });
-  }
-
-  if (result.competitors.length) {
-    evidence.push({
-      id: `${auditId}:market:competitors:evidence`,
-      type: "measured",
-      sourceProvider: "dataforseo_labs",
-      observedAt,
-      reliability: 0.84,
-      excerpt: `Search-overlap competitors: ${result.competitors.map((item) => `${item.domain} (${item.intersections} shared keywords)`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, competitors: result.competitors }
-    });
-  }
-
-  if (result.gaps.length) {
-    evidence.push({
-      id: `${auditId}:market:gaps:evidence`,
-      type: "measured",
-      sourceProvider: "dataforseo_labs",
-      observedAt,
-      reliability: 0.8,
-      excerpt: `Competitor-owned keyword gaps detected: ${result.gaps.slice(0, 6).map((item) => `${item.keyword}${item.searchVolume === undefined ? "" : ` (${item.searchVolume}/mo)`}`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, gaps: result.gaps }
-    });
-  }
-
-  return evidence;
-}
-
-function marketFindings(auditId: string, result: MarketIntelligenceResult): Finding[] {
-  if (!result.available || !result.gaps.length) return [];
-  const now = result.fetchedAt;
-  const evidenceId = `${auditId}:market:gaps:evidence`;
-  const searchVolumeKnown = result.gaps.filter((gap) => gap.searchVolume !== undefined);
-  const topGapVolume = Math.max(0, ...searchVolumeKnown.map((gap) => gap.searchVolume || 0));
-  const impact = topGapVolume >= 10_000 ? 8 : topGapVolume >= 1_000 ? 7 : 6;
-  const confidence = 8;
-  const ease = 5;
-  const iceScore = ice(impact, confidence, ease);
-
-  return [{
-    id: `${auditId}:market:keyword-gap:finding`,
-    auditId,
-    area: "market",
-    code: "MARKET_COMPETITOR_KEYWORD_GAPS",
-    title: "Competitors capture search demand the site may not cover",
-    description: `Pryo found ${result.gaps.length} high-priority search terms where sampled competitors rank and the audited domain does not appear in the same dataset. This is an opportunity signal, not proof that every term should become a page.`,
-    status: "important",
-    decision: "validate",
-    evidenceIds: [evidenceId],
-    recommendation: {
-      id: `${auditId}:market:keyword-gap:recommendation`,
-      title: "Validate the highest-value search gaps against product fit and buyer intent.",
-      action: "Review the top competitor-owned terms, cluster them by buyer problem and map only the strategically relevant clusters to existing or new pages.",
-      validation: "Confirm product relevance and search intent before creating content; then track rankings, qualified organic visits and assisted conversions for the selected cluster.",
-      dependencies: [],
-      affectedKpis: ["organic_visibility", "qualified_organic_traffic"],
-      estimatedEffort: "m",
-      timeToSignal: "4–12 weeks"
-    },
-    scores: {
-      impact,
-      confidence,
-      ease,
-      ice: iceScore,
-      urgency: 1,
-      unlock: 1.1,
-      priority: priorityScore(iceScore, 1, 1.1)
-    },
-    affectedKpis: ["organic_visibility", "qualified_organic_traffic"],
-    dependencies: [],
-    expectedOutcome: "Expand relevant search coverage without treating raw keyword volume as guaranteed business demand.",
-    timeToSignal: "4–12 weeks",
-    validationMethod: "Validate intent and product fit, publish or improve the selected page cluster, then measure rankings and qualified organic traffic.",
-    createdAt: now
-  }];
-}
-
-export async function runMarketIntelligence(auditId: string, url: string): Promise<MarketArtifacts> {
-  const config = configuration();
-  const domain = targetDomain(url);
-  const fetchedAt = new Date().toISOString();
-
-  if (!config.login || !config.password) {
-    return {
-      result: {
-        available: false,
-        provider: "unavailable",
-        targetDomain: domain,
-        locationName: config.locationName,
-        languageName: config.languageName,
-        keywords: [],
-        competitors: [],
-        gaps: [],
-        fetchedAt,
-        errorCode: "NOT_CONFIGURED"
-      },
-      evidence: [],
-      findings: [],
-      rootCauses: []
-    };
-  }
-
-  const [demandAttempt, competitorAttempt] = await Promise.allSettled([
-    fetchDemand(domain, config.locationName, config.languageName),
-    fetchCompetitors(domain, config.locationName, config.languageName)
-  ]);
-
-  const demand = demandAttempt.status === "fulfilled" ? demandAttempt.value : { keywords: [], costUsd: 0 };
-  const competitorData = competitorAttempt.status === "fulfilled" ? competitorAttempt.value : { competitors: [], costUsd: 0 };
-  const gapData = competitorData.competitors.length
-    ? await fetchGaps(domain, competitorData.competitors, config.locationName, config.languageName)
-    : { gaps: [], costUsd: 0 };
-
-  const available = Boolean(demand.keywords.length || competitorData.competitors.length || gapData.gaps.length);
-  const result: MarketIntelligenceResult = {
-    available,
-    provider: "dataforseo",
-    targetDomain: domain,
-    locationName: config.locationName,
-    languageName: config.languageName,
-    keywords: demand.keywords,
-    competitors: competitorData.competitors,
-    gaps: gapData.gaps,
-    fetchedAt,
-    errorCode: available ? undefined : "PROVIDER_ERROR"
-  };
-  const evidence = evidenceArtifacts(auditId, result);
-  const findings = marketFindings(auditId, result);
-  const rootCauses: RootCause[] = findings.map((finding) => ({
-    id: `${auditId}:root:market_capture`,
-    area: "market",
-    title: "Uncaptured search demand",
-    description: finding.description,
-    findingIds: [finding.id],
-    evidenceIds: finding.evidenceIds,
-    decision: finding.decision,
-    status: finding.status,
-    confidence: finding.scores.confidence * 10,
-    priority: finding.scores.priority,
-    action: finding.recommendation?.action || "Validate the market opportunity.",
-    validation: finding.recommendation?.validation || finding.validationMethod || "Validate the market opportunity before acting.",
-    timeToSignal: finding.timeToSignal
-  }));
-  const rootedFindings = findings.map((finding) => rootCauses[0] ? { ...finding, rootCauseId: rootCauses[0].id } : finding);
-  return { result, evidence, findings: rootedFindings, rootCauses };
-}
+export const AuditReportSchema = z.object({
+  audit: z.object({ id: z.string(), completedAt: z.string(), version: z.string() }),
+  project: ProjectContextSchema,
+  summary: z.object({
+    observedScore: z.number().min(0).max(100),
+    confidence: z.number().min(0).max(100),
+    coverage: z.number().min(0).max(100),
+    growthPotential: z.enum(["unknown", "low", "medium", "high"])
+  }),
+  scope: AuditScopeSchema.optional(),
+  market: MarketIntelligenceSchema.optional(),
+  categories: z.array(CategoryScoreSchema),
+  checks: z.array(AuditCheckSchema),
+  evidence: z.array(EvidenceSchema),
+  findings: z.array(FindingSchema),
+  rootCauses: z.array(RootCauseSchema).default([]),
+  priorities: z.array(RecommendationSchema)
+});
+export type AuditReport = z.infer<typeof AuditReportSchema>;
