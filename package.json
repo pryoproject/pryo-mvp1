@@ -1,26 +1,21 @@
 {
-  "name": "@pryo/worker",
+  "name": "pryo-mvp1",
   "version": "0.0.5",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit",
-    "start": "tsx src/index.ts"
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=24 <25"
   },
-  "dependencies": {
-    "tsx": "^4.20.5",
-    "@pryo/db": "workspace:*",
-    "@pryo/domain": "workspace:*",
-    "@pryo/market": "workspace:*",
-    "@pryo/queue": "workspace:*",
-    "@pryo/pipeline": "workspace:*",
-    "@pryo/crawler": "workspace:*",
-    "bullmq": "^5.58.0"
+  "scripts": {
+    "dev": "turbo dev --filter=@pryo/web",
+    "build": "turbo build --filter=@pryo/web",
+    "start": "pnpm --filter @pryo/web start",
+    "typecheck": "turbo typecheck",
+    "check": "pnpm typecheck && pnpm build",
+    "worker:start": "pnpm --filter @pryo/worker start"
   },
   "devDependencies": {
-    "typescript": "^5.9.2",
-    "@types/node": "^24.3.0"
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2"
   }
 }
