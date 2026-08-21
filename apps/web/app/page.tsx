@@ -29,12 +29,25 @@ const stageLabels: Record<string, string> = {
   understanding_business: "Understanding the business",
   analyzing_positioning: "Testing positioning against evidence",
   building_root_causes: "Grouping symptoms into root causes",
-  finalizing: "Building your Deep Snapshot",
+  finalizing: "Building the core Snapshot",
+  market_intelligence: "Mapping market demand and competitors",
   completed: "Snapshot ready"
 };
 
 function statusClass(status: Finding["status"]) { return `status status-${status}`; }
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function compactNumber(value?: number) {
+  if (value === undefined) return "—";
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+function money(value?: number) {
+  if (value === undefined) return "—";
+  return `$${value.toFixed(value >= 10 ? 0 : 2)}`;
+}
+function trend(value?: number) {
+  if (value === undefined) return "—";
+  return `${value > 0 ? "+" : ""}${value}%`;
+}
 
 async function readJsonResponse<T>(response: Response, fallback: string): Promise<T> {
   const text = await response.text();
@@ -60,7 +73,7 @@ export default function Home() {
   const strengths = useMemo(() => report?.findings.filter((finding) => finding.decision === "preserve") || [], [report]);
 
   async function pollAudit(auditId: string) {
-    for (let attempt = 0; attempt < 220; attempt += 1) {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
       let response: Response;
       try { response = await fetch(`/api/audits/${auditId}`, { cache: "no-store" }); }
       catch { await sleep(1_500); continue; }
@@ -112,9 +125,9 @@ export default function Home() {
         <label htmlFor="url">Website</label>
         <div className="input-row">
           <input id="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="example.com" autoComplete="url" />
-          <button type="submit" disabled={!url.trim() || loading}>{loading ? "Analyzing…" : "Run Deep Snapshot"}</button>
+          <button type="submit" disabled={!url.trim() || loading}>{loading ? "Analyzing…" : "Run Market Snapshot"}</button>
         </div>
-        <p className="hint">Pryo v0.4 scans key marketing pages, validates positioning evidence and checks mobile performance. No login or analytics access is required.</p>
+        <p className="hint">Pryo v0.5 scans key pages, validates positioning evidence and, when connected, maps search demand, competitors and keyword gaps.</p>
         {error && <div className="error" role="alert">{error}</div>}
       </form>
 
@@ -133,7 +146,7 @@ export default function Home() {
         <section className="report">
           <div className="report-heading">
             <div>
-              <p className="eyebrow">Pryo Deep Snapshot</p>
+              <p className="eyebrow">Pryo Market Snapshot</p>
               <h2>{report.project.company}</h2>
               <a href={report.project.canonicalUrl} target="_blank" rel="noreferrer">{report.project.canonicalUrl}</a>
               <div className="context-row">
@@ -155,7 +168,31 @@ export default function Home() {
           {report.scope && <div className="card scope-card">
             <div><p className="eyebrow">Evidence scope</p><h3>{report.scope.pagesAnalyzed} pages analyzed</h3></div>
             <div className="page-chips">{report.scope.pages.map((page) => <a key={page.url} href={page.url} target="_blank" rel="noreferrer"><strong>{page.kind}</strong><span>{page.title || new URL(page.url).pathname}</span></a>)}</div>
-            <p className="scope-status">Mobile performance: <strong>{report.scope.performanceAvailable ? "PageSpeed lab data included" : "not available in this run"}</strong></p>
+            <div className="scope-statuses">
+              <p className="scope-status">Mobile performance: <strong>{report.scope.performanceAvailable ? "PageSpeed lab data included" : "not available in this run"}</strong></p>
+              <p className="scope-status">Market intelligence: <strong>{report.scope.marketAvailable ? "DataForSEO demand + competitor data included" : report.scope.marketSource === "dataforseo" ? "connected, but no usable data in this run" : "not connected in this run"}</strong></p>
+            </div>
+          </div>}
+
+          {report.market && <div className="card section-card market-card">
+            <div className="section-title"><div><p className="eyebrow">Market intelligence</p><h3>Demand, competitors and search gaps</h3></div><span className="muted">External market evidence · {report.market.locationName} · {report.market.languageName}</span></div>
+            {report.market.available ? <div className="market-grid">
+              <div className="market-panel">
+                <div className="market-panel-title"><strong>Demand signals</strong><span>Top relevant terms</span></div>
+                <div className="market-list">{report.market.keywords.slice(0, 8).map((item) => <div className="market-row" key={item.keyword}><span>{item.keyword}</span><small>{compactNumber(item.searchVolume)} / mo · {trend(item.monthlyTrendPct)}</small></div>)}</div>
+              </div>
+              <div className="market-panel">
+                <div className="market-panel-title"><strong>Search competitors</strong><span>Organic overlap</span></div>
+                <div className="market-list">{report.market.competitors.slice(0, 5).map((item) => <div className="market-row" key={item.domain}><span>{item.domain}</span><small>{compactNumber(item.intersections)} shared · {compactNumber(item.organicEtv)} est. visits</small></div>)}</div>
+              </div>
+              <div className="market-panel market-panel-wide">
+                <div className="market-panel-title"><strong>Competitor-owned gaps</strong><span>Validate before creating content</span></div>
+                <div className="market-gap-table">
+                  <div className="market-gap-head"><span>Keyword</span><span>Competitor</span><span>Volume</span><span>CPC</span></div>
+                  {report.market.gaps.slice(0, 10).map((item) => <div className="market-gap-row" key={`${item.competitorDomain}:${item.keyword}`}><span>{item.keyword}</span><span>{item.competitorDomain}</span><span>{compactNumber(item.searchVolume)}</span><span>{money(item.cpc)}</span></div>)}
+                </div>
+              </div>
+            </div> : <p className="muted market-unavailable">Market data was not available for this run. The core website audit remains valid and independent of the external market provider.</p>}
           </div>}
 
           <div className="card section-card">
@@ -197,7 +234,7 @@ export default function Home() {
               </details>;
             })}</div>
           </div>
-          <p className="scope-note">Pryo v0.4 covers key-page structure, evidence-gated positioning and optional mobile PageSpeed lab signals. Market demand, competitors, AI discoverability and first-party analytics are still outside this score, so global growth potential remains intentionally unscored.</p>
+          <p className="scope-note">Pryo v0.5 adds external search-demand, competitor and keyword-gap evidence when the market provider is connected. First-party analytics and outcome history are still outside this score, so global growth potential remains intentionally unscored.</p>
         </section>
       )}
     </main>
