@@ -132,6 +132,48 @@ export const ProjectContextSchema = z.object({
 });
 export type ProjectContext = z.infer<typeof ProjectContextSchema>;
 
+export const MarketKeywordSchema = z.object({
+  keyword: z.string(),
+  searchVolume: z.number().nonnegative().optional(),
+  cpc: z.number().nonnegative().optional(),
+  competition: z.string().optional(),
+  competitionIndex: z.number().min(0).max(100).optional(),
+  monthlyTrendPct: z.number().optional()
+});
+export type MarketKeyword = z.infer<typeof MarketKeywordSchema>;
+
+export const SearchCompetitorSchema = z.object({
+  domain: z.string(),
+  intersections: z.number().int().nonnegative(),
+  avgPosition: z.number().nonnegative().optional(),
+  organicKeywords: z.number().int().nonnegative().optional(),
+  organicEtv: z.number().nonnegative().optional()
+});
+export type SearchCompetitor = z.infer<typeof SearchCompetitorSchema>;
+
+export const KeywordGapSchema = z.object({
+  competitorDomain: z.string(),
+  keyword: z.string(),
+  searchVolume: z.number().nonnegative().optional(),
+  cpc: z.number().nonnegative().optional(),
+  competitorPosition: z.number().nonnegative().optional()
+});
+export type KeywordGap = z.infer<typeof KeywordGapSchema>;
+
+export const MarketIntelligenceSchema = z.object({
+  available: z.boolean(),
+  provider: z.enum(["dataforseo", "unavailable"]),
+  targetDomain: z.string(),
+  locationName: z.string(),
+  languageName: z.string(),
+  keywords: z.array(MarketKeywordSchema).default([]),
+  competitors: z.array(SearchCompetitorSchema).default([]),
+  gaps: z.array(KeywordGapSchema).default([]),
+  fetchedAt: z.string(),
+  errorCode: z.enum(["NOT_CONFIGURED", "PROVIDER_ERROR"]).optional()
+});
+export type MarketIntelligence = z.infer<typeof MarketIntelligenceSchema>;
+
 export const AuditScopeSchema = z.object({
   pagesAnalyzed: z.number().int().min(1),
   pages: z.array(z.object({
@@ -140,7 +182,9 @@ export const AuditScopeSchema = z.object({
     title: z.string().optional()
   })),
   performanceAvailable: z.boolean(),
-  performanceSource: z.enum(["pagespeed_lab", "unavailable"])
+  performanceSource: z.enum(["pagespeed_lab", "unavailable"]),
+  marketAvailable: z.boolean().default(false),
+  marketSource: z.enum(["dataforseo", "unavailable"]).default("unavailable")
 });
 export type AuditScope = z.infer<typeof AuditScopeSchema>;
 
@@ -154,6 +198,7 @@ export const AuditReportSchema = z.object({
     growthPotential: z.enum(["unknown", "low", "medium", "high"])
   }),
   scope: AuditScopeSchema.optional(),
+  market: MarketIntelligenceSchema.optional(),
   categories: z.array(CategoryScoreSchema),
   checks: z.array(AuditCheckSchema),
   evidence: z.array(EvidenceSchema),
