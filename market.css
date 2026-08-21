@@ -1,0 +1,29 @@
+.market-card { overflow: hidden; }
+.market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.market-panel { min-width: 0; padding: 16px; border: 1px solid #e4e7eb; border-radius: 13px; background: #f8f9fa; }
+.market-panel-wide { grid-column: 1 / -1; }
+.market-panel-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.market-panel-title strong { font-size: 14px; }
+.market-panel-title span { color: #8a9098; font-size: 11px; }
+.market-list { border-top: 1px solid #e7e9ed; }
+.market-row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 10px 0; border-bottom: 1px solid #e7e9ed; }
+.market-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.market-row small { flex: 0 0 auto; color: #858b94; font-size: 10px; }
+.market-gap-table { border-top: 1px solid #e7e9ed; }
+.market-gap-head, .market-gap-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 90px 70px; gap: 12px; align-items: center; }
+.market-gap-head { padding: 9px 0; color: #9297a0; font-size: 9px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.market-gap-row { padding: 10px 0; border-top: 1px solid #eceef1; font-size: 12px; }
+.market-gap-row span:first-child { font-weight: 650; }
+.market-gap-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-gap-row span:nth-child(n+2) { color: #6f757e; }
+.market-unavailable { margin: 0; line-height: 1.55; }
+.scope-statuses { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+
+@media (max-width: 720px) {
+  .market-grid { grid-template-columns: 1fr; }
+  .market-panel-wide { grid-column: auto; }
+  .market-gap-head, .market-gap-row { grid-template-columns: minmax(0, 1fr) 70px; }
+  .market-gap-head span:nth-child(2), .market-gap-head span:nth-child(4),
+  .market-gap-row span:nth-child(2), .market-gap-row span:nth-child(4) { display: none; }
+  .market-row { align-items: flex-start; flex-direction: column; gap: 3px; }
+}

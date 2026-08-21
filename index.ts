@@ -1,50 +1,83 @@
-import { Queue, type JobsOptions } from "bullmq";
-import { Redis } from "ioredis";
+import { Worker } from "bullmq";
+import { AUDIT_QUEUE, createWorkerConnection, type AuditJobData } from "@pryo/queue";
+import { completeAudit, failAudit, updateAuditProgress, closeDatabase } from "@pryo/db";
+import { AuditReportSchema, type AuditReport } from "@pryo/domain";
+import { runMarketIntelligence } from "@pryo/market";
+import { runAuditPipeline } from "@pryo/pipeline";
+import { CrawlError } from "@pryo/crawler";
 
-export const AUDIT_QUEUE = "pryo-audits";
-export interface AuditJobData { auditId: string; url: string; }
+const connection = createWorkerConnection();
+const concurrency = Math.max(1, Math.min(4, Number(process.env.WORKER_CONCURRENCY || "2")));
 
-let producerRedis: Redis | undefined;
-let auditQueue: Queue<AuditJobData> | undefined;
+function enrichWithMarket(base: AuditReport, market: Awaited<ReturnType<typeof runMarketIntelligence>>): AuditReport {
+  const marketRecommendations = market.findings.flatMap((finding) => finding.recommendation ? [finding.recommendation] : []);
+  const findings = [...base.findings, ...market.findings]
+    .sort((a, b) => b.scores.priority - a.scores.priority || b.scores.confidence - a.scores.confidence);
+  const rootCauses = [...base.rootCauses, ...market.rootCauses]
+    .sort((a, b) => b.priority - a.priority || b.confidence - a.confidence);
 
-function redisUrl() {
-  const url = process.env.REDIS_URL;
-  if (!url) throw new Error("REDIS_URL is not configured");
-  return url;
+  return AuditReportSchema.parse({
+    ...base,
+    audit: { ...base.audit, completedAt: new Date().toISOString(), version: "0.5.0" },
+    summary: {
+      ...base.summary,
+      coverage: Math.min(80, base.summary.coverage + (market.result.available ? 20 : 0))
+    },
+    scope: base.scope ? {
+      ...base.scope,
+      marketAvailable: market.result.available,
+      marketSource: market.result.provider
+    } : undefined,
+    market: market.result,
+    evidence: [...base.evidence, ...market.evidence],
+    findings,
+    rootCauses,
+    priorities: [...base.priorities, ...marketRecommendations]
+  });
 }
 
-export function getProducerConnection() {
-  if (!producerRedis) producerRedis = new Redis(redisUrl(), { enableReadyCheck: true });
-  return producerRedis;
+const worker = new Worker<AuditJobData>(
+  AUDIT_QUEUE,
+  async (job) => {
+    const { auditId, url } = job.data;
+    try {
+      await updateAuditProgress(auditId, "starting", 5);
+      const baseReport = await runAuditPipeline(auditId, url, async (stage, progress) => {
+        await job.updateProgress(progress);
+        await updateAuditProgress(auditId, stage, progress);
+      });
+
+      await job.updateProgress(97);
+      await updateAuditProgress(auditId, "market_intelligence", 97);
+      const market = await runMarketIntelligence(auditId, baseReport.project.canonicalUrl);
+      const report = enrichWithMarket(baseReport, market);
+
+      await completeAudit(auditId, report);
+      return { auditId };
+    } catch (error) {
+      const status = typeof error === "object" && error && "status" in error ? Number((error as { status?: unknown }).status) : undefined;
+      const providerError = status === 401 || status === 403 || status === 429;
+      const code = error instanceof CrawlError ? error.code : providerError ? "AI_PROVIDER_UNAVAILABLE" : error instanceof Error && /openai/i.test(`${error.name} ${error.message}`) ? "AI_ANALYSIS_FAILED" : "AUDIT_FAILED";
+      const message = error instanceof CrawlError ? error.message : providerError ? "AI analysis is temporarily unavailable. Please retry later." : "The audit could not be completed. Please retry later.";
+      await failAudit(auditId, code, message);
+      throw error;
+    }
+  },
+  { connection, concurrency }
+);
+
+worker.on("ready", () => console.log(`Pryo worker v0.5 ready (concurrency=${concurrency})`));
+worker.on("completed", (job) => console.log("audit_completed", job.id));
+worker.on("failed", (job, error) => console.error("audit_failed", job?.id, error));
+worker.on("error", (error) => console.error("worker_error", error));
+
+async function shutdown(signal: string) {
+  console.log("worker_shutdown", signal);
+  await worker.close();
+  await connection.quit();
+  await closeDatabase();
+  process.exit(0);
 }
 
-export function createWorkerConnection() {
-  return new Redis(redisUrl(), { maxRetriesPerRequest: null, enableReadyCheck: true });
-}
-
-export function getAuditQueue() {
-  if (!auditQueue) auditQueue = new Queue<AuditJobData>(AUDIT_QUEUE, { connection: getProducerConnection() });
-  return auditQueue;
-}
-
-export async function enqueueAudit(data: AuditJobData) {
-  const options: JobsOptions = {
-    jobId: data.auditId,
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2_000 },
-    removeOnComplete: 100,
-    removeOnFail: 200
-  };
-  await getAuditQueue().add("run-audit", data, options);
-}
-
-export async function pingRedis() {
-  return (await getProducerConnection().ping()) === "PONG";
-}
-
-export async function closeQueue() {
-  if (auditQueue) await auditQueue.close();
-  auditQueue = undefined;
-  if (producerRedis) await producerRedis.quit();
-  producerRedis = undefined;
-}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
