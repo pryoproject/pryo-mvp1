@@ -26,6 +26,25 @@ function serializeJson(value: unknown) {
   return JSON.stringify(value);
 }
 
+function normalizeJsonField(value: unknown): unknown {
+  let current = value;
+
+  // Depending on the driver/runtime boundary, a jsonb value can arrive
+  // already decoded or as a JSON string. Normalize both forms here.
+  for (let attempt = 0; attempt < 2 && typeof current === "string"; attempt += 1) {
+    const trimmed = current.trim();
+    if (!trimmed) return undefined;
+
+    try {
+      current = JSON.parse(trimmed);
+    } catch {
+      return current;
+    }
+  }
+
+  return current;
+}
+
 export function getSql() {
   if (sqlClient) return sqlClient;
   const url = process.env.DATABASE_URL;
@@ -135,6 +154,10 @@ export async function getAudit(id: string): Promise<AuditRecord | null> {
   `;
   const row = rows[0];
   if (!row) return null;
+
+  const projectContext = normalizeJsonField(row.project_context);
+  const report = normalizeJsonField(row.report);
+
   return {
     id: row.id,
     inputUrl: row.input_url,
@@ -144,8 +167,8 @@ export async function getAudit(id: string): Promise<AuditRecord | null> {
     progress: row.progress,
     errorCode: row.error_code || undefined,
     errorMessage: row.error_message || undefined,
-    projectContext: row.project_context as ProjectContext | undefined,
-    report: row.report as AuditReport | undefined,
+    projectContext: projectContext as ProjectContext | undefined,
+    report: report as AuditReport | undefined,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : undefined
