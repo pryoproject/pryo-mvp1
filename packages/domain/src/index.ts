@@ -1,12 +1,23 @@
 import { z } from "zod";
 
 export const AuditAreaSchema = z.enum([
-  "positioning", "cro", "seo", "performance", "market", "competition", "technology", "ai_discoverability"
+  "positioning",
+  "cro",
+  "seo",
+  "performance",
+  "market",
+  "competition",
+  "technology",
+  "ai_discoverability"
 ]);
 export type AuditArea = z.infer<typeof AuditAreaSchema>;
 
 export const FindingStatusSchema = z.enum([
-  "strong", "improve", "important", "critical", "insufficient_data"
+  "strong",
+  "improve",
+  "important",
+  "critical",
+  "insufficient_data"
 ]);
 export type FindingStatus = z.infer<typeof FindingStatusSchema>;
 
@@ -24,6 +35,20 @@ export const EvidenceSchema = z.object({
   data: z.record(z.string(), z.unknown()).default({})
 });
 export type Evidence = z.infer<typeof EvidenceSchema>;
+
+export const AuditCheckSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  area: AuditAreaSchema,
+  label: z.string(),
+  passed: z.boolean().nullable(),
+  score: z.number().min(0).max(100),
+  confidence: z.number().min(0).max(1),
+  weight: z.number().positive(),
+  evidenceIds: z.array(z.string()),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+export type AuditCheck = z.infer<typeof AuditCheckSchema>;
 
 export const RecommendationSchema = z.object({
   id: z.string(),
@@ -68,6 +93,14 @@ export const FindingSchema = z.object({
 });
 export type Finding = z.infer<typeof FindingSchema>;
 
+export const CategoryScoreSchema = z.object({
+  area: AuditAreaSchema,
+  score: z.number().min(0).max(100),
+  confidence: z.number().min(0).max(100),
+  coverage: z.number().min(0).max(100)
+});
+export type CategoryScore = z.infer<typeof CategoryScoreSchema>;
+
 export const ProjectContextSchema = z.object({
   company: z.string(),
   canonicalUrl: z.string().url(),
@@ -91,6 +124,8 @@ export const AuditReportSchema = z.object({
     coverage: z.number().min(0).max(100),
     growthPotential: z.enum(["low", "medium", "high"])
   }),
+  categories: z.array(CategoryScoreSchema),
+  checks: z.array(AuditCheckSchema),
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
   priorities: z.array(RecommendationSchema)

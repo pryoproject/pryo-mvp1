@@ -1,11 +1,17 @@
 {
   "name": "pryo-mvp1",
+  "version": "0.0.2",
   "private": true,
   "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "typecheck": "turbo typecheck"
+    "dev": "turbo dev --filter=@pryo/web",
+    "build": "turbo build --filter=@pryo/web",
+    "start": "pnpm --filter @pryo/web start",
+    "typecheck": "turbo typecheck",
+    "check": "pnpm typecheck && pnpm build"
   },
   "devDependencies": {
     "turbo": "^2.5.6",
