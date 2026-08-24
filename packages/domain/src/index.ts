@@ -134,41 +134,64 @@ export type ProjectContext = z.infer<typeof ProjectContextSchema>;
 
 export const MarketKeywordSchema = z.object({
   keyword: z.string(),
+
+  // Legacy DataForSEO fields kept for old reports.
   searchVolume: z.number().nonnegative().optional(),
   cpc: z.number().nonnegative().optional(),
   competition: z.string().optional(),
   competitionIndex: z.number().min(0).max(100).optional(),
-  monthlyTrendPct: z.number().optional()
+  monthlyTrendPct: z.number().optional(),
+
+  // Brave Market Lite fields.
+  targetPosition: z.number().int().positive().optional(),
+  resultCount: z.number().int().nonnegative().optional(),
+  competitorCount: z.number().int().nonnegative().optional(),
+  competitiveDensity: z.enum(["low", "medium", "high"]).optional()
 });
 export type MarketKeyword = z.infer<typeof MarketKeywordSchema>;
 
 export const SearchCompetitorSchema = z.object({
   domain: z.string(),
+
+  // Legacy field. In Brave reports it mirrors sampled-query appearances.
   intersections: z.number().int().nonnegative(),
   avgPosition: z.number().nonnegative().optional(),
   organicKeywords: z.number().int().nonnegative().optional(),
-  organicEtv: z.number().nonnegative().optional()
+  organicEtv: z.number().nonnegative().optional(),
+
+  appearances: z.number().int().nonnegative().optional(),
+  sharePct: z.number().min(0).max(100).optional(),
+  bestPosition: z.number().int().positive().optional(),
+  queries: z.array(z.string()).default([]),
+  sampleTitle: z.string().optional(),
+  sampleUrl: z.string().url().optional()
 });
 export type SearchCompetitor = z.infer<typeof SearchCompetitorSchema>;
 
 export const KeywordGapSchema = z.object({
   competitorDomain: z.string(),
   keyword: z.string(),
+
+  // Legacy DataForSEO fields kept for old reports.
   searchVolume: z.number().nonnegative().optional(),
   cpc: z.number().nonnegative().optional(),
-  competitorPosition: z.number().nonnegative().optional()
+
+  competitorPosition: z.number().nonnegative().optional(),
+  resultUrl: z.string().url().optional()
 });
 export type KeywordGap = z.infer<typeof KeywordGapSchema>;
 
 export const MarketIntelligenceSchema = z.object({
   available: z.boolean(),
-  provider: z.enum(["dataforseo", "unavailable"]),
+  provider: z.enum(["brave", "dataforseo", "unavailable"]),
   targetDomain: z.string(),
   locationName: z.string(),
   languageName: z.string(),
   keywords: z.array(MarketKeywordSchema).default([]),
   competitors: z.array(SearchCompetitorSchema).default([]),
   gaps: z.array(KeywordGapSchema).default([]),
+  queryCount: z.number().int().nonnegative().default(0),
+  successfulQueries: z.number().int().nonnegative().default(0),
   fetchedAt: z.string(),
   errorCode: z.enum(["NOT_CONFIGURED", "PROVIDER_ERROR"]).optional()
 });
@@ -184,7 +207,7 @@ export const AuditScopeSchema = z.object({
   performanceAvailable: z.boolean(),
   performanceSource: z.enum(["pagespeed_lab", "unavailable"]),
   marketAvailable: z.boolean().default(false),
-  marketSource: z.enum(["dataforseo", "unavailable"]).default("unavailable")
+  marketSource: z.enum(["brave", "dataforseo", "unavailable"]).default("unavailable")
 });
 export type AuditScope = z.infer<typeof AuditScopeSchema>;
 
