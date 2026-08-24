@@ -18,7 +18,7 @@ function enrichWithMarket(base: AuditReport, market: Awaited<ReturnType<typeof r
 
   return AuditReportSchema.parse({
     ...base,
-    audit: { ...base.audit, completedAt: new Date().toISOString(), version: "0.5.0" },
+    audit: { ...base.audit, completedAt: new Date().toISOString(), version: "0.5.1" },
     summary: {
       ...base.summary,
       coverage: Math.min(80, base.summary.coverage + (market.result.available ? 20 : 0))
@@ -49,7 +49,7 @@ const worker = new Worker<AuditJobData>(
 
       await job.updateProgress(97);
       await updateAuditProgress(auditId, "market_intelligence", 97);
-      const market = await runMarketIntelligence(auditId, baseReport.project.canonicalUrl);
+      const market = await runMarketIntelligence(auditId, baseReport.project);
       const report = enrichWithMarket(baseReport, market);
 
       await completeAudit(auditId, report);
@@ -66,7 +66,7 @@ const worker = new Worker<AuditJobData>(
   { connection, concurrency }
 );
 
-worker.on("ready", () => console.log(`Pryo worker v0.5 ready (concurrency=${concurrency})`));
+worker.on("ready", () => console.log(`Pryo worker v0.5.1 ready (concurrency=${concurrency})`));
 worker.on("completed", (job) => console.log("audit_completed", job.id));
 worker.on("failed", (job, error) => console.error("audit_failed", job?.id, error));
 worker.on("error", (error) => console.error("worker_error", error));

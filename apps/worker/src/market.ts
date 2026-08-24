@@ -1,4 +1,4 @@
-import type { Evidence, Finding, RootCause } from "@pryo/domain";
+import type { Evidence, Finding, ProjectContext, RootCause } from "@pryo/domain";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -14,38 +14,42 @@ function priorityScore(iceScore: number, urgency = 1, unlock = 1) {
 
 export interface MarketKeyword {
   keyword: string;
-  searchVolume?: number;
-  cpc?: number;
-  competition?: string;
-  competitionIndex?: number;
-  monthlyTrendPct?: number;
+  targetPosition?: number;
+  resultCount?: number;
+  competitorCount?: number;
+  competitiveDensity?: "low" | "medium" | "high";
 }
 
 export interface SearchCompetitor {
   domain: string;
   intersections: number;
+  appearances: number;
+  sharePct: number;
   avgPosition?: number;
-  organicKeywords?: number;
-  organicEtv?: number;
+  bestPosition?: number;
+  queries: string[];
+  sampleTitle?: string;
+  sampleUrl?: string;
 }
 
 export interface KeywordGap {
   competitorDomain: string;
   keyword: string;
-  searchVolume?: number;
-  cpc?: number;
   competitorPosition?: number;
+  resultUrl?: string;
 }
 
 export interface MarketIntelligenceResult {
   available: boolean;
-  provider: "dataforseo" | "unavailable";
+  provider: "brave" | "unavailable";
   targetDomain: string;
   locationName: string;
   languageName: string;
   keywords: MarketKeyword[];
   competitors: SearchCompetitor[];
   gaps: KeywordGap[];
+  queryCount: number;
+  successfulQueries: number;
   fetchedAt: string;
   errorCode?: "NOT_CONFIGURED" | "PROVIDER_ERROR";
 }
@@ -57,228 +61,277 @@ export interface MarketArtifacts {
   rootCauses: RootCause[];
 }
 
-interface DataForSeoResponse {
-  status_code?: number;
-  status_message?: string;
-  cost?: number;
-  tasks?: Array<{
-    status_code?: number;
-    status_message?: string;
-    cost?: number;
-    result?: unknown[];
-  }>;
+interface BraveWebResult {
+  title?: unknown;
+  url?: unknown;
+  description?: unknown;
 }
 
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+interface BraveSearchResponse {
+  web?: { results?: BraveWebResult[] };
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+interface SearchResult {
+  title: string;
+  url: string;
+  description: string;
+  domain: string;
+  position: number;
+}
+
+interface QueryRun {
+  query: string;
+  results: SearchResult[];
+  ok: boolean;
+}
+
+const NOISE_DOMAINS = [
+  "youtube.com",
+  "linkedin.com",
+  "facebook.com",
+  "instagram.com",
+  "reddit.com",
+  "wikipedia.org",
+  "x.com",
+  "twitter.com",
+  "tiktok.com",
+  "medium.com",
+  "quora.com",
+  "github.com"
+];
+
+function cleanPhrase(value: string | undefined, max = 76) {
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(/[|•]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;:/-]+|[\s,;:/-]+$/g, "")
+    .trim();
+  return cleaned ? cleaned.slice(0, max) : undefined;
 }
 
 function configuration() {
-  const login = process.env.DATAFORSEO_LOGIN?.trim();
-  const password = process.env.DATAFORSEO_PASSWORD?.trim();
-  const locationName = process.env.DATAFORSEO_LOCATION_NAME?.trim() || "United States";
-  const languageName = process.env.DATAFORSEO_LANGUAGE_NAME?.trim() || "English";
-  return { login, password, locationName, languageName };
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
+  const rawCountry = process.env.BRAVE_COUNTRY?.trim().toUpperCase() || "US";
+  const country = /^[A-Z]{2}$/.test(rawCountry) ? rawCountry : "US";
+  const rawLanguage = process.env.BRAVE_SEARCH_LANG?.trim().toLowerCase() || "en";
+  const searchLang = /^[a-z]{2,5}$/.test(rawLanguage) ? rawLanguage : "en";
+  return { apiKey, country, searchLang };
 }
 
 function targetDomain(url: string) {
   return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
 }
 
-function monthlyTrendPct(monthlySearches: unknown): number | undefined {
-  if (!Array.isArray(monthlySearches)) return undefined;
-  const values = monthlySearches
-    .map((item) => numberOrUndefined((item as Record<string, unknown>)?.search_volume))
-    .filter((value): value is number => value !== undefined);
-  if (values.length < 2) return undefined;
-  const newest = values[0];
-  const oldest = values[values.length - 1];
-  if (oldest <= 0) return undefined;
-  return Math.round(((newest - oldest) / oldest) * 100);
+function domainFromUrl(url: string) {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); }
+  catch { return undefined; }
 }
 
-async function postDataForSeo(path: string, payload: Record<string, unknown>) {
-  const config = configuration();
-  if (!config.login || !config.password) throw new Error("DataForSEO credentials are not configured");
+function sameDomain(candidate: string, target: string) {
+  return candidate === target || candidate.endsWith(`.${target}`);
+}
 
-  const response = await fetch(`https://api.dataforseo.com${path}`, {
-    method: "POST",
-    signal: AbortSignal.timeout(30_000),
+function isNoiseDomain(domain: string) {
+  return NOISE_DOMAINS.some((noise) => domain === noise || domain.endsWith(`.${noise}`));
+}
+
+function addQuery(list: string[], value: string | undefined) {
+  const query = cleanPhrase(value, 150);
+  if (!query || query.length < 3) return;
+  if (list.some((existing) => existing.toLowerCase() === query.toLowerCase())) return;
+  list.push(query);
+}
+
+function buildQueries(project: ProjectContext) {
+  const queries: string[] = [];
+  const category = cleanPhrase(project.category);
+  const product = cleanPhrase(project.product);
+  const audience = cleanPhrase(project.targetAudience[0], 60);
+
+  if (category) {
+    addQuery(queries, category);
+    addQuery(queries, `best ${category}`);
+    if (!/\b(software|platform|tool|tools|app|apps)\b/i.test(category)) addQuery(queries, `${category} software`);
+    addQuery(queries, `${category} tools`);
+    if (audience) addQuery(queries, `${category} for ${audience}`);
+  }
+
+  if (queries.length < 4 && product) {
+    addQuery(queries, product);
+    addQuery(queries, `best ${product}`);
+    if (audience) addQuery(queries, `${product} for ${audience}`);
+  }
+
+  if (queries.length < 4 && audience) {
+    addQuery(queries, `software for ${audience}`);
+    addQuery(queries, `tools for ${audience}`);
+  }
+
+  // The sample is intentionally small to keep MVP costs predictable.
+  return queries.slice(0, 6);
+}
+
+async function braveSearch(query: string, country: string, searchLang: string): Promise<SearchResult[]> {
+  const config = configuration();
+  if (!config.apiKey) throw new Error("Brave Search API key is not configured");
+
+  const endpoint = new URL("https://api.search.brave.com/res/v1/web/search");
+  endpoint.searchParams.set("q", query);
+  endpoint.searchParams.set("count", "10");
+  endpoint.searchParams.set("country", country);
+  endpoint.searchParams.set("search_lang", searchLang);
+
+  const response = await fetch(endpoint, {
+    signal: AbortSignal.timeout(20_000),
     headers: {
-      authorization: `Basic ${Buffer.from(`${config.login}:${config.password}`).toString("base64")}`,
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify([payload])
+      accept: "application/json",
+      "X-Subscription-Token": config.apiKey
+    }
   });
 
   const raw = await response.text();
-  if (!response.ok) throw new Error(`DataForSEO returned HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Brave Search returned HTTP ${response.status}`);
 
-  let data: DataForSeoResponse;
-  try { data = JSON.parse(raw) as DataForSeoResponse; }
-  catch { throw new Error("DataForSEO returned invalid JSON"); }
+  let data: BraveSearchResponse;
+  try { data = JSON.parse(raw) as BraveSearchResponse; }
+  catch { throw new Error("Brave Search returned invalid JSON"); }
 
-  if (data.status_code !== 20000) {
-    throw new Error(data.status_message || `DataForSEO request failed (${data.status_code || "unknown"})`);
-  }
+  const rows = Array.isArray(data.web?.results) ? data.web?.results || [] : [];
+  const results: SearchResult[] = [];
 
-  const task = data.tasks?.[0];
-  if (!task || task.status_code !== 20000) {
-    throw new Error(task?.status_message || `DataForSEO task failed (${task?.status_code || "unknown"})`);
-  }
-
-  return {
-    result: task.result || [],
-    costUsd: (numberOrUndefined(data.cost) || 0) + (numberOrUndefined(task.cost) || 0)
-  };
-}
-
-async function fetchDemand(domain: string, locationName: string, languageName: string) {
-  const response = await postDataForSeo("/v3/keywords_data/google_ads/keywords_for_site/live", {
-    target: domain,
-    target_type: "site",
-    location_name: locationName,
-    language_name: languageName,
-    sort_by: "search_volume",
-    include_adult_keywords: false
+  rows.slice(0, 10).forEach((item, index) => {
+    const url = typeof item.url === "string" ? item.url : "";
+    const domain = domainFromUrl(url);
+    if (!url || !domain) return;
+    results.push({
+      title: typeof item.title === "string" ? item.title : domain,
+      url,
+      description: typeof item.description === "string" ? item.description : "",
+      domain,
+      position: index + 1
+    });
   });
 
-  const keywords = response.result
-    .map((raw) => raw as Record<string, unknown>)
-    .map((item): MarketKeyword | undefined => {
-      const keyword = stringOrUndefined(item.keyword);
-      if (!keyword) return undefined;
-      return {
-        keyword,
-        searchVolume: numberOrUndefined(item.search_volume),
-        cpc: numberOrUndefined(item.cpc),
-        competition: stringOrUndefined(item.competition),
-        competitionIndex: numberOrUndefined(item.competition_index),
-        monthlyTrendPct: monthlyTrendPct(item.monthly_searches)
-      };
-    })
-    .filter((item): item is MarketKeyword => Boolean(item))
-    .sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0))
-    .slice(0, 20);
-
-  return { keywords, costUsd: response.costUsd };
+  return results;
 }
 
-async function fetchCompetitors(domain: string, locationName: string, languageName: string) {
-  const response = await postDataForSeo("/v3/dataforseo_labs/google/competitors_domain/live", {
-    target: domain,
-    location_name: locationName,
-    language_name: languageName,
-    item_types: ["organic"],
-    exclude_top_domains: true,
-    exclude_domains: [domain],
-    max_rank_group: 20,
-    limit: 8,
-    order_by: ["metrics.organic.count,desc"]
-  });
-
-  const first = response.result[0] as Record<string, unknown> | undefined;
-  const items = Array.isArray(first?.items) ? first.items : [];
-  const competitors = items
-    .map((raw) => raw as Record<string, unknown>)
-    .map((item): SearchCompetitor | undefined => {
-      const competitorDomain = stringOrUndefined(item.domain);
-      if (!competitorDomain || competitorDomain === domain) return undefined;
-      const fullDomainMetrics = item.full_domain_metrics as Record<string, unknown> | undefined;
-      const organic = fullDomainMetrics?.organic as Record<string, unknown> | undefined;
-      return {
-        domain: competitorDomain,
-        intersections: numberOrUndefined(item.intersections) || 0,
-        avgPosition: numberOrUndefined(item.avg_position),
-        organicKeywords: numberOrUndefined(organic?.count),
-        organicEtv: numberOrUndefined(organic?.etv)
-      };
-    })
-    .filter((item): item is SearchCompetitor => Boolean(item))
-    .slice(0, 5);
-
-  return { competitors, costUsd: response.costUsd };
+function competitiveDensity(competitorCount: number): "low" | "medium" | "high" {
+  if (competitorCount >= 7) return "high";
+  if (competitorCount >= 4) return "medium";
+  return "low";
 }
 
-async function fetchGaps(domain: string, competitors: SearchCompetitor[], locationName: string, languageName: string) {
-  const gaps: KeywordGap[] = [];
-  let costUsd = 0;
+function buildMarketData(target: string, runs: QueryRun[]) {
+  const successful = runs.filter((run) => run.ok);
+  const keywords: MarketKeyword[] = [];
+  const competitorMap = new Map<string, {
+    positions: number[];
+    queries: Set<string>;
+    sampleTitle?: string;
+    sampleUrl?: string;
+  }>();
 
-  for (const competitor of competitors.slice(0, 2)) {
-    try {
-      const response = await postDataForSeo("/v3/dataforseo_labs/google/domain_intersection/live", {
-        target1: competitor.domain,
-        target2: domain,
-        location_name: locationName,
-        language_name: languageName,
-        intersections: false,
-        item_types: ["organic"],
-        limit: 10,
-        order_by: ["keyword_data.keyword_info.search_volume,desc"]
-      });
-      costUsd += response.costUsd;
-      const first = response.result[0] as Record<string, unknown> | undefined;
-      const items = Array.isArray(first?.items) ? first.items : [];
-      for (const raw of items) {
-        const item = raw as Record<string, unknown>;
-        const keywordData = item.keyword_data as Record<string, unknown> | undefined;
-        const keywordInfo = keywordData?.keyword_info as Record<string, unknown> | undefined;
-        const firstSerp = item.first_domain_serp_element as Record<string, unknown> | undefined;
-        const keyword = stringOrUndefined(keywordData?.keyword);
-        if (!keyword) continue;
-        gaps.push({
-          competitorDomain: competitor.domain,
-          keyword,
-          searchVolume: numberOrUndefined(keywordInfo?.search_volume),
-          cpc: numberOrUndefined(keywordInfo?.cpc),
-          competitorPosition: numberOrUndefined(firstSerp?.rank_group) || numberOrUndefined(firstSerp?.rank_absolute)
-        });
-      }
-    } catch {
-      // Keep the rest of the market audit usable if one competitor gap call fails.
+  for (const run of successful) {
+    const targetResult = run.results.find((result) => sameDomain(result.domain, target));
+    const queryCompetitors = new Set<string>();
+
+    for (const result of run.results) {
+      if (sameDomain(result.domain, target) || isNoiseDomain(result.domain)) continue;
+      queryCompetitors.add(result.domain);
+
+      const current: { positions: number[]; queries: Set<string>; sampleTitle?: string; sampleUrl?: string } =
+        competitorMap.get(result.domain) || { positions: [], queries: new Set<string>() };
+      current.positions.push(result.position);
+      current.queries.add(run.query);
+      current.sampleTitle ||= result.title;
+      current.sampleUrl ||= result.url;
+      competitorMap.set(result.domain, current);
     }
-  }
 
-  const deduped = [...new Map(
-    gaps
-      .sort((a, b) => (b.searchVolume || 0) - (a.searchVolume || 0))
-      .map((gap) => [`${gap.competitorDomain}:${gap.keyword.toLowerCase()}`, gap])
-  ).values()].slice(0, 15);
-
-  return { gaps: deduped, costUsd };
-}
-
-function evidenceArtifacts(auditId: string, result: MarketIntelligenceResult): Evidence[] {
-  if (!result.available) return [];
-  const observedAt = result.fetchedAt;
-  const evidence: Evidence[] = [];
-
-  if (result.keywords.length) {
-    evidence.push({
-      id: `${auditId}:market:demand:evidence`,
-      type: "measured",
-      sourceProvider: "dataforseo_google_ads",
-      observedAt,
-      reliability: 0.82,
-      excerpt: `Top observed demand terms include ${result.keywords.slice(0, 5).map((item) => `${item.keyword}${item.searchVolume === undefined ? "" : ` (${item.searchVolume}/mo)`}`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, keywords: result.keywords }
+    keywords.push({
+      keyword: run.query,
+      targetPosition: targetResult?.position,
+      resultCount: run.results.length,
+      competitorCount: queryCompetitors.size,
+      competitiveDensity: competitiveDensity(queryCompetitors.size)
     });
   }
+
+  const totalSuccessful = Math.max(1, successful.length);
+  const competitors: SearchCompetitor[] = [...competitorMap.entries()]
+    .map(([domain, data]) => {
+      const appearances = data.queries.size;
+      const avgPosition = data.positions.length
+        ? Math.round((data.positions.reduce((sum, value) => sum + value, 0) / data.positions.length) * 10) / 10
+        : undefined;
+      return {
+        domain,
+        intersections: appearances,
+        appearances,
+        sharePct: Math.round((appearances / totalSuccessful) * 100),
+        avgPosition,
+        bestPosition: data.positions.length ? Math.min(...data.positions) : undefined,
+        queries: [...data.queries].slice(0, 6),
+        sampleTitle: data.sampleTitle,
+        sampleUrl: data.sampleUrl
+      };
+    })
+    .sort((a, b) => b.appearances - a.appearances || (a.bestPosition || 99) - (b.bestPosition || 99))
+    .slice(0, 6);
+
+  const gaps: KeywordGap[] = [];
+  for (const run of successful) {
+    const targetPresent = run.results.some((result) => sameDomain(result.domain, target));
+    if (targetPresent) continue;
+
+    const competitor = run.results.find(
+      (result) => result.position <= 5 && !sameDomain(result.domain, target) && !isNoiseDomain(result.domain)
+    );
+    if (!competitor) continue;
+
+    gaps.push({
+      competitorDomain: competitor.domain,
+      keyword: run.query,
+      competitorPosition: competitor.position,
+      resultUrl: competitor.url
+    });
+  }
+
+  return { keywords, competitors, gaps };
+}
+
+function evidenceArtifacts(
+  auditId: string,
+  result: MarketIntelligenceResult
+): Evidence[] {
+  if (!result.available) return [];
+
+  const targetAppearances = result.keywords.filter((item) => item.targetPosition !== undefined).length;
+  const evidence: Evidence[] = [{
+    id: `${auditId}:market:serp:evidence`,
+    type: "measured",
+    sourceProvider: "brave_search",
+    observedAt: result.fetchedAt,
+    reliability: 0.76,
+    excerpt: `Pryo sampled ${result.successfulQueries} commercial search intents. ${result.targetDomain} appeared in the top 10 for ${targetAppearances}/${result.successfulQueries} successful queries.`,
+    data: {
+      provider: "brave",
+      country: result.locationName,
+      searchLang: result.languageName,
+      querySignals: result.keywords
+    }
+  }];
 
   if (result.competitors.length) {
     evidence.push({
       id: `${auditId}:market:competitors:evidence`,
       type: "measured",
-      sourceProvider: "dataforseo_labs",
-      observedAt,
-      reliability: 0.84,
-      excerpt: `Search-overlap competitors: ${result.competitors.map((item) => `${item.domain} (${item.intersections} shared keywords)`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, competitors: result.competitors }
+      sourceProvider: "brave_search",
+      observedAt: result.fetchedAt,
+      reliability: 0.74,
+      excerpt: `Recurring SERP domains include ${result.competitors.slice(0, 5).map((item) => `${item.domain} (${item.appearances}/${result.successfulQueries} sampled intents)`).join(" | ")}.`,
+      data: { competitors: result.competitors }
     });
   }
 
@@ -286,43 +339,58 @@ function evidenceArtifacts(auditId: string, result: MarketIntelligenceResult): E
     evidence.push({
       id: `${auditId}:market:gaps:evidence`,
       type: "measured",
-      sourceProvider: "dataforseo_labs",
-      observedAt,
-      reliability: 0.8,
-      excerpt: `Competitor-owned keyword gaps detected: ${result.gaps.slice(0, 6).map((item) => `${item.keyword}${item.searchVolume === undefined ? "" : ` (${item.searchVolume}/mo)`}`).join(" | ")}.`,
-      data: { locationName: result.locationName, languageName: result.languageName, gaps: result.gaps }
+      sourceProvider: "brave_search",
+      observedAt: result.fetchedAt,
+      reliability: 0.72,
+      excerpt: `The target domain was absent from the top 10 for ${result.gaps.length} sampled commercial intents where another non-platform domain appeared in the top 5.`,
+      data: { gaps: result.gaps }
     });
   }
 
   return evidence;
 }
 
-function marketFindings(auditId: string, result: MarketIntelligenceResult): Finding[] {
-  if (!result.available || !result.gaps.length) return [];
+function marketFindings(
+  auditId: string,
+  result: MarketIntelligenceResult
+): { findings: Finding[]; rootCauses: RootCause[] } {
+  if (!result.available || result.successfulQueries === 0 || result.gaps.length === 0) {
+    return { findings: [], rootCauses: [] };
+  }
+
+  const gapRatio = result.gaps.length / result.successfulQueries;
+  if (gapRatio < 0.5) return { findings: [], rootCauses: [] };
+
   const now = result.fetchedAt;
-  const evidenceId = `${auditId}:market:gaps:evidence`;
-  const searchVolumeKnown = result.gaps.filter((gap) => gap.searchVolume !== undefined);
-  const topGapVolume = Math.max(0, ...searchVolumeKnown.map((gap) => gap.searchVolume || 0));
-  const impact = topGapVolume >= 10_000 ? 8 : topGapVolume >= 1_000 ? 7 : 6;
-  const confidence = 8;
+  const impact = gapRatio >= 0.75 ? 8 : 7;
+  const confidence = 7;
   const ease = 5;
   const iceScore = ice(impact, confidence, ease);
+  const priority = priorityScore(iceScore, 1, 1.1);
+  const findingId = `${auditId}:market:serp-coverage:finding`;
+  const evidenceIds = [
+    `${auditId}:market:serp:evidence`,
+    ...(result.gaps.length ? [`${auditId}:market:gaps:evidence`] : [])
+  ];
 
-  return [{
-    id: `${auditId}:market:keyword-gap:finding`,
+  const action = "Validate the sampled commercial intents against product fit, then strengthen or create only the pages that address strategically relevant gaps.";
+  const validation = "Re-run the same SERP sample after changes and track whether relevant pages begin appearing for the selected intents; later validate qualified organic traffic with first-party analytics.";
+
+  const finding: Finding = {
+    id: findingId,
     auditId,
     area: "market",
-    code: "MARKET_COMPETITOR_KEYWORD_GAPS",
-    title: "Competitors capture search demand the site may not cover",
-    description: `Pryo found ${result.gaps.length} high-priority search terms where sampled competitors rank and the audited domain does not appear in the same dataset. This is an opportunity signal, not proof that every term should become a page.`,
-    status: "important",
+    code: "MARKET_SERP_COVERAGE_GAP",
+    title: "The site is absent from many sampled commercial search intents",
+    description: `Pryo found the target outside the top 10 for ${result.gaps.length}/${result.successfulQueries} successful commercial SERP samples. This is a directional visibility signal, not search-volume evidence and not proof that every sampled query deserves a page.`,
+    status: gapRatio >= 0.75 ? "important" : "improve",
     decision: "validate",
-    evidenceIds: [evidenceId],
+    evidenceIds,
     recommendation: {
-      id: `${auditId}:market:keyword-gap:recommendation`,
-      title: "Validate the highest-value search gaps against product fit and buyer intent.",
-      action: "Review the top competitor-owned terms, cluster them by buyer problem and map only the strategically relevant clusters to existing or new pages.",
-      validation: "Confirm product relevance and search intent before creating content; then track rankings, qualified organic visits and assisted conversions for the selected cluster.",
+      id: `${auditId}:market:serp-coverage:recommendation`,
+      title: "Validate the most relevant search-intent gaps.",
+      action,
+      validation,
       dependencies: [],
       affectedKpis: ["organic_visibility", "qualified_organic_traffic"],
       estimatedEffort: "m",
@@ -335,83 +403,107 @@ function marketFindings(auditId: string, result: MarketIntelligenceResult): Find
       ice: iceScore,
       urgency: 1,
       unlock: 1.1,
-      priority: priorityScore(iceScore, 1, 1.1)
+      priority
     },
     affectedKpis: ["organic_visibility", "qualified_organic_traffic"],
     dependencies: [],
-    expectedOutcome: "Expand relevant search coverage without treating raw keyword volume as guaranteed business demand.",
+    expectedOutcome: "Increase presence across strategically relevant commercial search intents without treating SERP sampling as guaranteed demand.",
     timeToSignal: "4–12 weeks",
-    validationMethod: "Validate intent and product fit, publish or improve the selected page cluster, then measure rankings and qualified organic traffic.",
+    validationMethod: validation,
     createdAt: now
-  }];
+  };
+
+  const root: RootCause = {
+    id: `${auditId}:root:search-market-coverage`,
+    area: "market",
+    title: "Search market coverage",
+    description: "Repeated absence across sampled commercial SERPs suggests a market-visibility constraint worth validating before broader content expansion.",
+    findingIds: [findingId],
+    evidenceIds,
+    decision: "validate",
+    status: finding.status,
+    confidence: 72,
+    priority: Math.min(100, priority + 5),
+    action,
+    validation,
+    timeToSignal: "4–12 weeks"
+  };
+
+  return { findings: [finding], rootCauses: [root] };
 }
 
-export async function runMarketIntelligence(auditId: string, url: string): Promise<MarketArtifacts> {
+export async function runMarketIntelligence(
+  auditId: string,
+  project: ProjectContext
+): Promise<MarketArtifacts> {
   const config = configuration();
-  const domain = targetDomain(url);
+  const domain = targetDomain(project.canonicalUrl);
   const fetchedAt = new Date().toISOString();
+  const queries = buildQueries(project);
 
-  if (!config.login || !config.password) {
-    return {
-      result: {
-        available: false,
-        provider: "unavailable",
-        targetDomain: domain,
-        locationName: config.locationName,
-        languageName: config.languageName,
-        keywords: [],
-        competitors: [],
-        gaps: [],
-        fetchedAt,
-        errorCode: "NOT_CONFIGURED"
-      },
-      evidence: [],
-      findings: [],
-      rootCauses: []
-    };
+  const unavailable = (
+    errorCode: "NOT_CONFIGURED" | "PROVIDER_ERROR",
+    keywords: MarketKeyword[] = [],
+    competitors: SearchCompetitor[] = [],
+    gaps: KeywordGap[] = [],
+    successfulQueries = 0
+  ): MarketArtifacts => ({
+    result: {
+      available: false,
+      provider: errorCode === "NOT_CONFIGURED" ? "unavailable" : "brave",
+      targetDomain: domain,
+      locationName: config.country,
+      languageName: config.searchLang,
+      keywords,
+      competitors,
+      gaps,
+      queryCount: queries.length,
+      successfulQueries,
+      fetchedAt,
+      errorCode
+    },
+    evidence: [],
+    findings: [],
+    rootCauses: []
+  });
+
+  if (!config.apiKey) return unavailable("NOT_CONFIGURED");
+  if (queries.length < 2) return unavailable("PROVIDER_ERROR");
+
+  const runs: QueryRun[] = await Promise.all(
+    queries.map(async (query) => {
+      try {
+        const results = await braveSearch(query, config.country, config.searchLang);
+        return { query, results, ok: results.length > 0 };
+      } catch {
+        return { query, results: [], ok: false };
+      }
+    })
+  );
+
+  const successfulQueries = runs.filter((run) => run.ok).length;
+  const data = buildMarketData(domain, runs);
+  const minimumSuccessful = Math.max(2, Math.ceil(queries.length * 0.5));
+
+  if (successfulQueries < minimumSuccessful) {
+    return unavailable("PROVIDER_ERROR", data.keywords, data.competitors, data.gaps, successfulQueries);
   }
 
-  const [demandAttempt, competitorAttempt] = await Promise.allSettled([
-    fetchDemand(domain, config.locationName, config.languageName),
-    fetchCompetitors(domain, config.locationName, config.languageName)
-  ]);
-
-  const demand = demandAttempt.status === "fulfilled" ? demandAttempt.value : { keywords: [], costUsd: 0 };
-  const competitorData = competitorAttempt.status === "fulfilled" ? competitorAttempt.value : { competitors: [], costUsd: 0 };
-  const gapData = competitorData.competitors.length
-    ? await fetchGaps(domain, competitorData.competitors, config.locationName, config.languageName)
-    : { gaps: [], costUsd: 0 };
-
-  const available = Boolean(demand.keywords.length || competitorData.competitors.length || gapData.gaps.length);
   const result: MarketIntelligenceResult = {
-    available,
-    provider: "dataforseo",
+    available: true,
+    provider: "brave",
     targetDomain: domain,
-    locationName: config.locationName,
-    languageName: config.languageName,
-    keywords: demand.keywords,
-    competitors: competitorData.competitors,
-    gaps: gapData.gaps,
-    fetchedAt,
-    errorCode: available ? undefined : "PROVIDER_ERROR"
+    locationName: config.country,
+    languageName: config.searchLang,
+    keywords: data.keywords,
+    competitors: data.competitors,
+    gaps: data.gaps,
+    queryCount: queries.length,
+    successfulQueries,
+    fetchedAt
   };
+
   const evidence = evidenceArtifacts(auditId, result);
-  const findings = marketFindings(auditId, result);
-  const rootCauses: RootCause[] = findings.map((finding) => ({
-    id: `${auditId}:root:market_capture`,
-    area: "market",
-    title: "Uncaptured search demand",
-    description: finding.description,
-    findingIds: [finding.id],
-    evidenceIds: finding.evidenceIds,
-    decision: finding.decision,
-    status: finding.status,
-    confidence: finding.scores.confidence * 10,
-    priority: finding.scores.priority,
-    action: finding.recommendation?.action || "Validate the market opportunity.",
-    validation: finding.recommendation?.validation || finding.validationMethod || "Validate the market opportunity before acting.",
-    timeToSignal: finding.timeToSignal
-  }));
-  const rootedFindings = findings.map((finding) => rootCauses[0] ? { ...finding, rootCauseId: rootCauses[0].id } : finding);
-  return { result, evidence, findings: rootedFindings, rootCauses };
+  const decision = marketFindings(auditId, result);
+  return { result, evidence, findings: decision.findings, rootCauses: decision.rootCauses };
 }
