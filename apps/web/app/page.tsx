@@ -30,7 +30,7 @@ const stageLabels: Record<string, string> = {
   analyzing_positioning: "Testing positioning against evidence",
   building_root_causes: "Grouping symptoms into root causes",
   finalizing: "Building the core Snapshot",
-  market_intelligence: "Mapping market demand and competitors",
+  market_intelligence: "Mapping search landscape and competitors",
   completed: "Snapshot ready"
 };
 
@@ -127,7 +127,7 @@ export default function Home() {
           <input id="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="example.com" autoComplete="url" />
           <button type="submit" disabled={!url.trim() || loading}>{loading ? "Analyzing…" : "Run Market Snapshot"}</button>
         </div>
-        <p className="hint">Pryo v0.5 scans key pages, validates positioning evidence and, when connected, maps search demand, competitors and keyword gaps.</p>
+        <p className="hint">Pryo v0.5.1 scans key pages, validates positioning evidence and, when Brave Search is connected, samples commercial SERPs to map recurring competitors and visibility gaps.</p>
         {error && <div className="error" role="alert">{error}</div>}
       </form>
 
@@ -170,26 +170,54 @@ export default function Home() {
             <div className="page-chips">{report.scope.pages.map((page) => <a key={page.url} href={page.url} target="_blank" rel="noreferrer"><strong>{page.kind}</strong><span>{page.title || new URL(page.url).pathname}</span></a>)}</div>
             <div className="scope-statuses">
               <p className="scope-status">Mobile performance: <strong>{report.scope.performanceAvailable ? "PageSpeed lab data included" : "not available in this run"}</strong></p>
-              <p className="scope-status">Market intelligence: <strong>{report.scope.marketAvailable ? "DataForSEO demand + competitor data included" : report.scope.marketSource === "dataforseo" ? "connected, but no usable data in this run" : "not connected in this run"}</strong></p>
+              <p className="scope-status">Market intelligence: <strong>{
+                report.scope.marketAvailable
+                  ? report.scope.marketSource === "brave"
+                    ? "Brave Search SERP sample included"
+                    : "external SEO market data included"
+                  : report.scope.marketSource === "brave"
+                    ? "Brave connected, but the sample was incomplete"
+                    : "not connected in this run"
+              }</strong></p>
             </div>
           </div>}
 
           {report.market && <div className="card section-card market-card">
-            <div className="section-title"><div><p className="eyebrow">Market intelligence</p><h3>Demand, competitors and search gaps</h3></div><span className="muted">External market evidence · {report.market.locationName} · {report.market.languageName}</span></div>
+            <div className="section-title"><div><p className="eyebrow">Market intelligence</p><h3>Search landscape, competitors and gaps</h3></div><span className="muted">External market evidence · {report.market.locationName} · {report.market.languageName}</span></div>
             {report.market.available ? <div className="market-grid">
               <div className="market-panel">
-                <div className="market-panel-title"><strong>Demand signals</strong><span>Top relevant terms</span></div>
-                <div className="market-list">{report.market.keywords.slice(0, 8).map((item) => <div className="market-row" key={item.keyword}><span>{item.keyword}</span><small>{compactNumber(item.searchVolume)} / mo · {trend(item.monthlyTrendPct)}</small></div>)}</div>
+                <div className="market-panel-title"><strong>{report.market.provider === "brave" ? "Search intent sample" : "Demand signals"}</strong><span>{report.market.provider === "brave" ? `${report.market.successfulQueries}/${report.market.queryCount} successful SERPs` : "Top relevant terms"}</span></div>
+                <div className="market-list">{report.market.keywords.slice(0, 8).map((item) => <div className="market-row" key={item.keyword}><span>{item.keyword}</span><small>{
+                  report.market?.provider === "brave"
+                    ? `${item.targetPosition ? `Target #${item.targetPosition}` : "Target not top 10"} · ${item.competitiveDensity || "—"} density`
+                    : `${compactNumber(item.searchVolume)} / mo · ${trend(item.monthlyTrendPct)}`
+                }</small></div>)}</div>
               </div>
+
               <div className="market-panel">
-                <div className="market-panel-title"><strong>Search competitors</strong><span>Organic overlap</span></div>
-                <div className="market-list">{report.market.competitors.slice(0, 5).map((item) => <div className="market-row" key={item.domain}><span>{item.domain}</span><small>{compactNumber(item.intersections)} shared · {compactNumber(item.organicEtv)} est. visits</small></div>)}</div>
+                <div className="market-panel-title"><strong>Search competitors</strong><span>{report.market.provider === "brave" ? "Recurring SERP domains" : "Organic overlap"}</span></div>
+                <div className="market-list">{report.market.competitors.slice(0, 6).map((item) => <div className="market-row" key={item.domain}><span>{item.domain}</span><small>{
+                  report.market?.provider === "brave"
+                    ? `${item.appearances ?? item.intersections}/${report.market.successfulQueries} intents · best ${item.bestPosition ? `#${item.bestPosition}` : "—"}`
+                    : `${compactNumber(item.intersections)} shared · ${compactNumber(item.organicEtv)} est. visits`
+                }</small></div>)}</div>
               </div>
+
               <div className="market-panel market-panel-wide">
-                <div className="market-panel-title"><strong>Competitor-owned gaps</strong><span>Validate before creating content</span></div>
+                <div className="market-panel-title"><strong>Competitor-owned gaps</strong><span>Validate relevance before acting</span></div>
                 <div className="market-gap-table">
-                  <div className="market-gap-head"><span>Keyword</span><span>Competitor</span><span>Volume</span><span>CPC</span></div>
-                  {report.market.gaps.slice(0, 10).map((item) => <div className="market-gap-row" key={`${item.competitorDomain}:${item.keyword}`}><span>{item.keyword}</span><span>{item.competitorDomain}</span><span>{compactNumber(item.searchVolume)}</span><span>{money(item.cpc)}</span></div>)}
+                  <div className="market-gap-head">
+                    <span>{report.market.provider === "brave" ? "Query" : "Keyword"}</span>
+                    <span>Competitor</span>
+                    <span>{report.market.provider === "brave" ? "Competitor pos." : "Volume"}</span>
+                    <span>{report.market.provider === "brave" ? "Target" : "CPC"}</span>
+                  </div>
+                  {report.market.gaps.slice(0, 10).map((item) => <div className="market-gap-row" key={`${item.competitorDomain}:${item.keyword}`}>
+                    <span>{item.keyword}</span>
+                    <span>{item.competitorDomain}</span>
+                    <span>{report.market?.provider === "brave" ? (item.competitorPosition ? `#${item.competitorPosition}` : "—") : compactNumber(item.searchVolume)}</span>
+                    <span>{report.market?.provider === "brave" ? "Not top 10" : money(item.cpc)}</span>
+                  </div>)}
                 </div>
               </div>
             </div> : <p className="muted market-unavailable">Market data was not available for this run. The core website audit remains valid and independent of the external market provider.</p>}
@@ -234,7 +262,8 @@ export default function Home() {
               </details>;
             })}</div>
           </div>
-          <p className="scope-note">Pryo v0.5 adds external search-demand, competitor and keyword-gap evidence when the market provider is connected. First-party analytics and outcome history are still outside this score, so global growth potential remains intentionally unscored.</p>
+
+          <p className="scope-note">Pryo v0.5.1 uses a small Brave Search SERP sample for directional competitor and visibility evidence. It does not claim search volume, CPC or guaranteed demand from that sample. First-party analytics and outcome history remain outside this score, so global growth potential stays intentionally unscored.</p>
         </section>
       )}
     </main>
